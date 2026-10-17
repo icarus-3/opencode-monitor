@@ -1,0 +1,7 @@
+data/
+node_modules/
+runtime/
+*.zip
+*.log
+config.local.json
+dist/

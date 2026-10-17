@@ -1,0 +1,9 @@
+{
+  "port": 8765,
+  "pollSeconds": 8,
+  "defaultModel": "opencode/deepseek-v4.1-flash-free",
+  "databases": ["auto"],
+  "logDirectories": ["auto"],
+  "includeExampleRecords": false,
+  "rollingWindow": 5
+}

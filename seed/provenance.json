@@ -1,0 +1,7 @@
+{
+  "description": "Anonymized reference benchmark metrics, OpenCode 1.18.29, 2026-10-17. No prompts, completions, local paths, credentials, or original session/message IDs. Example records are not imported by default.",
+  "measurements_sha256": "4810bef871f75ca34b6a6212d105dd322f463a14665a298358c48d0a1c6c2873",
+  "n": 20,
+  "model": "opencode/deepseek-v4.1-flash-free",
+  "note": "Reference results do not calibrate other users environments."
+}
