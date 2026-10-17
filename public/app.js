@@ -51,21 +51,14 @@ async function refresh(){
     const d=await response.json();
     const history=d.rows.filter(r=>!r.seed&&!r.tps_outlier&&Number.isFinite(r.included_tps));
     const latest=history.at(-1);
-    const latestRaw=d.rows.filter(r=>!r.seed).at(-1);
-    const newerUnmeasured=!!(latestRaw&&(!latest||Date.parse(latestRaw.timestamp)>Date.parse(latest.timestamp)));
-    const isPartial=r=>String(r?.quality||'').includes('partial_part_timing_estimate');
     const recent=history.slice(-20);
     const average=recent.length?recent.reduce((sum,r)=>sum+r.included_tps,0)/recent.length:null;
-    const partialRecent=recent.filter(isPartial).length;
     const chartRows=history.slice(-120);
     $('model-name').textContent=d.selectedModel||'';
     $('updated').textContent='更新于 '+time(d.updated)+' · 每 8 秒自动刷新';
     $('live-speed').textContent=latest?fmt(latest.included_tps):'—';
-    if(newerUnmeasured){
-      const reason=latestRaw.tps_outlier?'最新调用测速异常，已剔除':!latestRaw.complete?'最新调用尚未完成':latestRaw.quality==='incomplete_or_missing_timestamps'?'最新回复没有可用片段计时':'最新调用计时不完整';
-      $('live-time').textContent=reason+(latest?' · 显示上次有效值 '+time(latest.timestamp):' · 暂无有效测速');
-    }else{$('live-time').textContent=latest?'最近测得 '+time(latest.timestamp)+(isPartial(latest)?' · 部分计时估算':''):'等待有效记录';}
-    $('live-time').classList.toggle('stale',newerUnmeasured);
+    $('live-time').textContent=latest?'有效值时间 '+time(latest.timestamp):'暂无有效值';
+    $('live-time').classList.remove('stale');
     $('average-speed').textContent=fmt(average);
     $('average-count').textContent='基于 '+recent.length+' 条；已排除异常高值；部分计时估算 '+partialRecent+' 条';
     const inputTokens=Number(d.summary?.input_tokens??0),outputTokens=Number(d.summary?.output_tokens??0);
