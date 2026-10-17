@@ -65,8 +65,8 @@ export function analyze(rows, bases, window=5) {
 
 export function tokenUsageBuckets(rows, bucketSize=10_000_000, historyLimit=6) {
   const requestedSize=Number(bucketSize),size=Number.isFinite(requestedSize)&&requestedSize>=1?Math.floor(requestedSize):10_000_000;
-  const makeBucket=index=>({index,used_tokens:0,output_tokens:0,decode_seconds:0,valid_samples:0});
-  const finalize=b=>({index:b.index,used_tokens:size,output_tokens:b.output_tokens,decode_seconds:b.decode_seconds,average_tps:b.decode_seconds>0?b.output_tokens/b.decode_seconds:null,valid_samples:b.valid_samples});
+  const makeBucket=index=>({index,used_tokens:0,output_tokens:0,decode_seconds:0,valid_samples:0,speed_sum:0,speed_weight:0});
+  const finalize=b=>({index:b.index,used_tokens:size,output_tokens:b.output_tokens,decode_seconds:b.decode_seconds,average_tps:b.speed_weight>0?b.speed_sum/b.speed_weight:null,valid_samples:b.valid_samples});
   const completed=[];
   let current=makeBucket(1),totalTokens=0,inputTokens=0,outputTokens=0;
   for(const row of rows) {
@@ -82,7 +82,7 @@ export function tokenUsageBuckets(rows, bucketSize=10_000_000, historyLimit=6) {
     while(remaining>0) {
       const amount=Math.min(remaining,size-current.used_tokens),fraction=amount/usage;
       current.used_tokens+=amount;
-      if(valid) {current.output_tokens+=output*fraction;current.decode_seconds+=duration*fraction;current.valid_samples++;}
+      if(valid) {current.output_tokens+=output*fraction;current.decode_seconds+=duration*fraction;current.speed_sum+=row.decode_tps*fraction;current.speed_weight+=fraction;current.valid_samples++;}
       remaining-=amount;
       if(current.used_tokens>=size) {completed.push(finalize(current));current=makeBucket(current.index+1);}
     }
@@ -90,6 +90,6 @@ export function tokenUsageBuckets(rows, bucketSize=10_000_000, historyLimit=6) {
   return {
     bucket_size:size,total_tokens:totalTokens,input_tokens:inputTokens,output_tokens:outputTokens,
     completed_segments:completed.length,recent_completed:completed.slice(-historyLimit),
-    current:{...current,average_tps:current.decode_seconds>0?current.output_tokens/current.decode_seconds:null},
+    current:{index:current.index,used_tokens:current.used_tokens,output_tokens:current.output_tokens,decode_seconds:current.decode_seconds,valid_samples:current.valid_samples,average_tps:current.speed_weight>0?current.speed_sum/current.speed_weight:null},
   };
 }

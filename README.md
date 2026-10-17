@@ -54,7 +54,7 @@ Use hosts already configured in your SSH config or `user@host` names. SSH authen
 - Current generation speed and the average of the latest 20 valid calls. Extreme speed outliers are excluded from these speed statistics.
 - A time-series chart of recent valid speeds.
 - Cumulative input and output token counts across all models and configured sources. Output includes reasoning tokens.
-- A weighted average generation speed for each configurable token-usage interval (10 million tokens by default). The calculation uses output tokens divided by decode time, excludes speed outliers, and proportionally splits calls that cross an interval boundary.
+- An arithmetic average of valid per-call generation speeds for each configurable token-usage interval (10 million tokens by default). Speed outliers are excluded, and calls crossing an interval boundary contribute in proportion to their token share.
 
 ## Configuration
 

@@ -69,7 +69,7 @@ async function refresh(){
     $('token-interval-label').textContent='每 '+tokenFmt(bucketSize)+' tokens 区间均速';
     const completedBuckets=tokenUsage.recent_completed||[],latestBucket=completedBuckets.at(-1);
     $('token-interval-speed').textContent=fmt(latestBucket?.average_tps);
-    const latestText=latestBucket?'最近完成第 '+latestBucket.index+' 段 · '+latestBucket.valid_samples+' 次有效测速 · 异常高值已剔除':'尚未完成第一个区间';
+    const latestText=latestBucket?'最近完成第 '+latestBucket.index+' 段 · '+latestBucket.valid_samples+' 次有效测速（按调用平均）· 异常高值已剔除':'尚未完成第一个区间';
     $('token-interval-caption').textContent=latestText+' · 当前第 '+(currentBucket.index??1)+' 段进度 '+tokenFmt(currentBucket.used_tokens??0)+' / '+tokenFmt(bucketSize)+' tokens';
     $('token-bucket-history').innerHTML=completedBuckets.slice(0,-1).map(item=>'<span class="bucket-chip">第 '+item.index+' 段 · '+(item.average_tps==null?'—':fmt(item.average_tps)+' tok/s')+'</span>').join('')||'<span class="caption">暂无更早区间</span>';
     $('chart-range').textContent='最近 '+chartRows.length+' 条有效测速';
