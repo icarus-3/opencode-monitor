@@ -42,6 +42,13 @@ function setBucketHistoryExpanded(expanded){
   toggle.textContent=expanded?'收起历史区间':'展开历史区间（'+(toggle.dataset.count??0)+'）';
 }
 $('token-bucket-history-toggle').addEventListener('click',()=>setBucketHistoryExpanded($('token-bucket-history-toggle').getAttribute('aria-expanded')!=='true'));
+function setSourceUsageExpanded(expanded){
+  const toggle=$('source-usage-toggle'),list=$('source-usage-list');
+  toggle.setAttribute('aria-expanded',String(expanded));
+  list.hidden=!expanded;
+  toggle.textContent=expanded?'收起来源用量':'展开来源用量（'+(toggle.dataset.count??0)+'）';
+}
+$('source-usage-toggle').addEventListener('click',()=>setSourceUsageExpanded($('source-usage-toggle').getAttribute('aria-expanded')!=='true'));
 async function refresh(){
   if(loading)return;
   loading=true;
@@ -65,6 +72,13 @@ async function refresh(){
     const tokenUsage=d.token_usage||{};
     $('token-total').textContent=tokenFmt(tokenUsage.total_tokens??(inputTokens+outputTokens));
     $('token-breakdown').textContent='输入 '+tokenFmt(tokenUsage.input_tokens??inputTokens)+' · 输出 '+tokenFmt(tokenUsage.output_tokens??outputTokens);
+    const sourceRows=tokenUsage.sources||[],sourceToggle=$('source-usage-toggle'),sourceList=$('source-usage-list');
+    const sourceExpanded=sourceRows.length>0&&sourceToggle.getAttribute('aria-expanded')==='true';
+    sourceToggle.dataset.count=String(sourceRows.length);
+    sourceToggle.hidden=sourceRows.length===0;
+    sourceToggle.textContent=sourceExpanded?'收起来源用量':'展开来源用量（'+sourceRows.length+'）';
+    sourceList.hidden=!sourceExpanded;
+    sourceList.innerHTML=sourceRows.map(source=>'<div class="source-usage-row"><strong class="source-usage-name">'+esc(source.label)+'</strong><span class="source-usage-totals">输入 '+tokenFmt(source.input_tokens)+' · 输出 '+tokenFmt(source.output_tokens)+' · 合计 '+tokenFmt(source.total_tokens)+' tokens</span></div>').join('');
     const bucketSize=Number(tokenUsage.bucket_size)||10000000,currentBucket=tokenUsage.current||{};
     $('token-interval-label').textContent='每 '+tokenFmt(bucketSize)+' tokens 区间均速';
     const completedBuckets=tokenUsage.recent_completed||[],latestBucket=completedBuckets.at(-1);

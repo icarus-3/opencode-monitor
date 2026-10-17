@@ -245,6 +245,28 @@ export class Store {
     const allRows=this.db.prepare('SELECT data FROM records ORDER BY ts,id').all().map(x=>parse(x.data)).filter(x=>x&&!x.seed);
     const allModelRows=analyze(allRows,bases,this.config.rollingWindow).rows.filter(included);
     const tokenUsage=tokenUsageBuckets(allModelRows,this.config.tokenSpeedBucketSize);
+    const normalizeSource=value=>path.resolve(String(value)).replace(/\\/g,'/').toLowerCase();
+    const localPaths=new Set((this.config.databases??[]).filter(value=>typeof value==='string').map(normalizeSource));
+    const remoteIds=(this.config.sshDatabases??[]).map(source=>sourceId(source.id??source.host));
+    const sourceTotals=new Map();
+    const ensureSource=(key,label)=>{
+      if(!sourceTotals.has(key))sourceTotals.set(key,{id:key,label,input_tokens:0,output_tokens:0,total_tokens:0});
+      return sourceTotals.get(key);
+    };
+    if(localPaths.size)ensureSource('local','本地');
+    for(const id of remoteIds)ensureSource('ssh:'+id,id);
+    for(const row of allModelRows){
+      const rawSource=String(row.source??'');
+      const sourcePath=rawSource?normalizeSource(rawSource):'';
+      const leaf=rawSource.replace(/\\/g,'/').split('/').at(-1)?.toLowerCase()??'';
+      const remoteId=remoteIds.find(id=>leaf===(`${id}.sqlite`).toLowerCase());
+      const source=sourcePath&&localPaths.has(sourcePath)?ensureSource('local','本地'):
+        remoteId?ensureSource('ssh:'+remoteId,remoteId):ensureSource('other','其他来源');
+      const input=Number.isFinite(row.input_tokens)?Math.max(0,row.input_tokens):0;
+      const output=Number.isFinite(row.total_output_tokens)?Math.max(0,row.total_output_tokens):0;
+      source.input_tokens+=input;source.output_tokens+=output;source.total_tokens+=input+output;
+    }
+    tokenUsage.sources=[...sourceTotals.values()];
     const timed=visible.filter(x=>x.decode_tps!=null), valid=timed.filter(x=>!x.tps_outlier), recent=valid.slice(-20), allEvents=this.db.prepare('SELECT data FROM events ORDER BY ts,id').all().map(x=>parse(x.data)).filter(x=>(model==='all'||x.model===model)&&included(x));
     // Session errors are preferred to matching log events for the same message/status.
     const canonical=allEvents.filter(x=>!x.id.startsWith('log:')||!allEvents.some(y=>y.id.startsWith('message:')&&y.session_id===x.session_id&&y.message_id===x.message_id&&y.http_status===x.http_status));

@@ -20,6 +20,11 @@ main{display:flex;flex-direction:column;gap:18px}
 .history-toggle[hidden],.bucket-history[hidden]{display:none}
 .bucket-history{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
 .bucket-chip{padding:3px 7px;border-radius:6px;background:#eef4fc;color:#526176;font-size:11px;font-variant-numeric:tabular-nums}
+.source-usage-list{display:grid;gap:8px;margin-top:10px}
+.source-usage-list[hidden]{display:none}
+.source-usage-row{display:flex;flex-direction:column;gap:2px;padding-top:7px;border-top:1px solid #edf0f5}
+.source-usage-name{color:#344054;font-size:12px}
+.source-usage-totals{color:#66758a;font-size:11px;font-variant-numeric:tabular-nums}
 .panel{padding:22px 24px}
 .chart-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:10px}
 h2{font-size:18px;margin:0 0 6px}

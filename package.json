@@ -1,6 +1,6 @@
 {
   "name": "opencode-monitor",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Local, read-only OpenCode usage and speed dashboard",
   "private": false,
   "type": "module",
