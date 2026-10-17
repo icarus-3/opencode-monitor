@@ -1,0 +1,17 @@
+# Personal configuration and collected monitoring data
+config.json
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+*.tmp
+
+# Optional bundled runtime and local dependencies
+runtime/
+node_modules/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/

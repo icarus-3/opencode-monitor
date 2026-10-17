@@ -1,0 +1,14 @@
+{
+  "name": "opencode-monitor",
+  "version": "1.1.0",
+  "description": "Local, read-only OpenCode usage and speed dashboard",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "port": 8765,
+  "pollSeconds": 8,
+  "defaultModel": "all",
+  "databases": [
+    "auto"
+  ],
+  "logDirectories": [
+    "auto"
+  ],
+  "rollingWindow": 5,
+  "sshDatabases": []
+}

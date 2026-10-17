@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenCode Monitor</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>OpenCode Monitor</h1>
+      <div id="model-name" class="model">读取模型中…</div>
+    </div>
+    <div id="updated" class="updated" aria-live="polite">正在读取…</div>
+  </header>
+  <main>
+    <div id="error" role="alert"></div>
+    <section class="cards" aria-label="速度统计">
+      <article class="card">
+        <div class="label">实时速度</div>
+        <div class="value"><strong id="live-speed">—</strong><span>tok/s</span></div>
+        <div id="live-time" class="caption">等待有效记录</div>
+      </article>
+      <article class="card">
+        <div class="label">最近 20 次平均</div>
+        <div class="value"><strong id="average-speed">—</strong><span>tok/s</span></div>
+        <div id="average-count" class="caption">等待有效记录</div>
+      </article>
+      <article class="card">
+        <div class="label">累计 Token 用量</div>
+        <div class="value"><strong id="token-total">—</strong><span>tokens</span></div>
+        <div id="token-breakdown" class="caption">输入 — · 输出 —</div>
+        <div class="caption">所选模型累计 · 输出含推理</div>
+      </article>    </section>
+    <article class="panel">
+      <div class="chart-heading">
+        <div>
+          <h2>速度随时间变化</h2>
+          <div id="chart-range" class="caption">最近有效测速</div>
+        </div>
+      </div>
+      <div id="speed-chart"></div>
+    </article>
+  </main>
+</body>
+</html>
