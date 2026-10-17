@@ -9,5 +9,6 @@
     "auto"
   ],
   "rollingWindow": 5,
+  "tokenSpeedBucketSize": 10000000,
   "sshDatabases": []
 }

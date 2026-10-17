@@ -62,3 +62,34 @@ export function analyze(rows, bases, window=5) {
   });
   return {rows,diagnostics};
 }
+
+export function tokenUsageBuckets(rows, bucketSize=10_000_000, historyLimit=6) {
+  const requestedSize=Number(bucketSize),size=Number.isFinite(requestedSize)&&requestedSize>=1?Math.floor(requestedSize):10_000_000;
+  const makeBucket=index=>({index,used_tokens:0,output_tokens:0,decode_seconds:0,valid_samples:0});
+  const finalize=b=>({index:b.index,used_tokens:size,output_tokens:b.output_tokens,decode_seconds:b.decode_seconds,average_tps:b.decode_seconds>0?b.output_tokens/b.decode_seconds:null,valid_samples:b.valid_samples});
+  const completed=[];
+  let current=makeBucket(1),totalTokens=0,inputTokens=0,outputTokens=0;
+  for(const row of rows) {
+    if(row.seed) continue;
+    const input=Number.isFinite(row.input_tokens)?Math.max(0,row.input_tokens):0;
+    const output=Number.isFinite(row.total_output_tokens)?Math.max(0,row.total_output_tokens):0;
+    const usage=input+output;
+    inputTokens+=input;outputTokens+=output;totalTokens+=usage;
+    if(usage<=0) continue;
+    const duration=row.decode_duration;
+    const valid=!row.tps_outlier&&Number.isFinite(row.decode_tps)&&row.decode_tps>0&&Number.isFinite(duration)&&duration>0&&output>0;
+    let remaining=usage;
+    while(remaining>0) {
+      const amount=Math.min(remaining,size-current.used_tokens),fraction=amount/usage;
+      current.used_tokens+=amount;
+      if(valid) {current.output_tokens+=output*fraction;current.decode_seconds+=duration*fraction;current.valid_samples++;}
+      remaining-=amount;
+      if(current.used_tokens>=size) {completed.push(finalize(current));current=makeBucket(current.index+1);}
+    }
+  }
+  return {
+    bucket_size:size,total_tokens:totalTokens,input_tokens:inputTokens,output_tokens:outputTokens,
+    completed_segments:completed.length,recent_completed:completed.slice(-historyLimit),
+    current:{...current,average_tps:current.decode_seconds>0?current.output_tokens/current.decode_seconds:null},
+  };
+}

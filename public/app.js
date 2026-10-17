@@ -62,8 +62,16 @@ async function refresh(){
     $('average-speed').textContent=fmt(average);
     $('average-count').textContent='基于 '+recent.length+' 条；已排除异常高值；部分计时估算 '+partialRecent+' 条';
     const inputTokens=Number(d.summary?.input_tokens??0),outputTokens=Number(d.summary?.output_tokens??0);
-    $('token-total').textContent=tokenFmt(inputTokens+outputTokens);
-    $('token-breakdown').textContent='输入 '+tokenFmt(inputTokens)+' · 输出 '+tokenFmt(outputTokens);
+    const tokenUsage=d.token_usage||{};
+    $('token-total').textContent=tokenFmt(tokenUsage.total_tokens??(inputTokens+outputTokens));
+    $('token-breakdown').textContent='输入 '+tokenFmt(tokenUsage.input_tokens??inputTokens)+' · 输出 '+tokenFmt(tokenUsage.output_tokens??outputTokens);
+    const bucketSize=Number(tokenUsage.bucket_size)||10000000,currentBucket=tokenUsage.current||{};
+    $('token-interval-label').textContent='每 '+tokenFmt(bucketSize)+' tokens 区间均速';
+    const completedBuckets=tokenUsage.recent_completed||[],latestBucket=completedBuckets.at(-1);
+    $('token-interval-speed').textContent=fmt(latestBucket?.average_tps);
+    const latestText=latestBucket?'最近完成第 '+latestBucket.index+' 段 · '+latestBucket.valid_samples+' 次有效测速 · 异常高值已剔除':'尚未完成第一个区间';
+    $('token-interval-caption').textContent=latestText+' · 当前第 '+(currentBucket.index??1)+' 段进度 '+tokenFmt(currentBucket.used_tokens??0)+' / '+tokenFmt(bucketSize)+' tokens';
+    $('token-bucket-history').innerHTML=completedBuckets.slice(0,-1).map(item=>'<span class="bucket-chip">第 '+item.index+' 段 · '+(item.average_tps==null?'—':fmt(item.average_tps)+' tok/s')+'</span>').join('')||'<span class="caption">暂无更早区间</span>';
     $('chart-range').textContent='最近 '+chartRows.length+' 条有效测速';
     $('error').textContent=(d.warnings||[]).join('；');
     renderChart(chartRows);

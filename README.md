@@ -53,7 +53,8 @@ Use hosts already configured in your SSH config or `user@host` names. SSH authen
 
 - Current generation speed and the average of the latest 20 valid calls. Extreme speed outliers are excluded from these speed statistics.
 - A time-series chart of recent valid speeds.
-- Cumulative input and output token counts for the selected model. Output includes reasoning tokens.
+- Cumulative input and output token counts across all models and configured sources. Output includes reasoning tokens.
+- A weighted average generation speed for each configurable token-usage interval (10 million tokens by default). The calculation uses output tokens divided by decode time, excludes speed outliers, and proportionally splits calls that cross an interval boundary.
 
 ## Configuration
 
@@ -64,6 +65,7 @@ Use hosts already configured in your SSH config or `user@host` names. SSH authen
 - `sshDatabases`: optional SSH host/database entries.
 - `pollSeconds`: refresh interval (minimum 5 seconds).
 - `defaultModel`: model to display, or `"all"` to select the latest model when records exist.
+- `tokenSpeedBucketSize`: total input-plus-output tokens per average-speed interval; defaults to `10000000`.
 
 ## Development
 

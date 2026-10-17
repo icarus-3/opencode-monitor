@@ -7,13 +7,15 @@ h1{font-size:25px;line-height:1.2;margin:0}
 .model{margin-top:7px}
 .updated{text-align:right}
 main{display:flex;flex-direction:column;gap:18px}
-.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 .card,.panel{background:#fff;border:1px solid #e1e7ef;border-radius:12px;box-shadow:0 4px 18px rgba(22,42,70,.04)}
 .card{padding:22px 24px;min-height:146px}
 .label{color:#526176;font-size:14px}
 .value{display:flex;align-items:baseline;gap:10px;margin:12px 0 7px}
 .value strong{font-size:38px;font-weight:650;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .value span{font-size:14px;color:#68778c}
+.bucket-history{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.bucket-chip{padding:3px 7px;border-radius:6px;background:#eef4fc;color:#526176;font-size:11px;font-variant-numeric:tabular-nums}
 .panel{padding:22px 24px}
 .chart-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:10px}
 h2{font-size:18px;margin:0 0 6px}
