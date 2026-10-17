@@ -60,7 +60,7 @@ async function refresh(){
     $('live-time').textContent=latest?'有效值时间 '+time(latest.timestamp):'暂无有效值';
     $('live-time').classList.remove('stale');
     $('average-speed').textContent=fmt(average);
-    $('average-count').textContent='基于 '+recent.length+' 条；已排除异常高值；部分计时估算 '+partialRecent+' 条';
+    $('average-count').textContent='基于 '+recent.length+' 条；已排除异常高值';
     const inputTokens=Number(d.summary?.input_tokens??0),outputTokens=Number(d.summary?.output_tokens??0);
     const tokenUsage=d.token_usage||{};
     $('token-total').textContent=tokenFmt(tokenUsage.total_tokens??(inputTokens+outputTokens));
