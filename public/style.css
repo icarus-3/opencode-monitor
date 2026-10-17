@@ -14,6 +14,10 @@ main{display:flex;flex-direction:column;gap:18px}
 .value{display:flex;align-items:baseline;gap:10px;margin:12px 0 7px}
 .value strong{font-size:38px;font-weight:650;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .value span{font-size:14px;color:#68778c}
+.history-toggle{margin-top:8px;padding:0;border:0;background:none;color:#3478d4;font:inherit;font-size:12px;cursor:pointer}
+.history-toggle:hover{text-decoration:underline}
+.history-toggle:focus-visible{outline:2px solid #3478d4;outline-offset:3px;border-radius:2px}
+.history-toggle[hidden],.bucket-history[hidden]{display:none}
 .bucket-history{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
 .bucket-chip{padding:3px 7px;border-radius:6px;background:#eef4fc;color:#526176;font-size:11px;font-variant-numeric:tabular-nums}
 .panel{padding:22px 24px}

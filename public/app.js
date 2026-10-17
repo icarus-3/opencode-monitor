@@ -35,6 +35,13 @@ function renderChart(rows){
   $('speed-chart').innerHTML=html;
 }
 let loading=false;
+function setBucketHistoryExpanded(expanded){
+  const toggle=$('token-bucket-history-toggle'),history=$('token-bucket-history');
+  toggle.setAttribute('aria-expanded',String(expanded));
+  history.hidden=!expanded;
+  toggle.textContent=expanded?'收起历史区间':'展开历史区间（'+(toggle.dataset.count??0)+'）';
+}
+$('token-bucket-history-toggle').addEventListener('click',()=>setBucketHistoryExpanded($('token-bucket-history-toggle').getAttribute('aria-expanded')!=='true'));
 async function refresh(){
   if(loading)return;
   loading=true;
@@ -71,7 +78,13 @@ async function refresh(){
     $('token-interval-speed').textContent=fmt(latestBucket?.average_tps);
     const latestText=latestBucket?'最近完成第 '+latestBucket.index+' 段 · '+latestBucket.valid_samples+' 次有效测速（按调用平均）· 异常高值已剔除':'尚未完成第一个区间';
     $('token-interval-caption').textContent=latestText+' · 当前第 '+(currentBucket.index??1)+' 段进度 '+tokenFmt(currentBucket.used_tokens??0)+' / '+tokenFmt(bucketSize)+' tokens';
-    $('token-bucket-history').innerHTML=completedBuckets.slice(0,-1).map(item=>'<span class="bucket-chip">第 '+item.index+' 段 · '+(item.average_tps==null?'—':fmt(item.average_tps)+' tok/s')+'</span>').join('')||'<span class="caption">暂无更早区间</span>';
+    const olderBuckets=completedBuckets.slice(0,-1),historyToggle=$('token-bucket-history-toggle'),bucketHistory=$('token-bucket-history');
+    const historyExpanded=olderBuckets.length>0&&historyToggle.getAttribute('aria-expanded')==='true';
+    historyToggle.dataset.count=String(olderBuckets.length);
+    historyToggle.hidden=olderBuckets.length===0;
+    historyToggle.textContent=historyExpanded?'收起历史区间':'展开历史区间（'+olderBuckets.length+'）';
+    bucketHistory.hidden=!historyExpanded;
+    bucketHistory.innerHTML=olderBuckets.map(item=>'<span class="bucket-chip">第 '+item.index+' 段 · '+(item.average_tps==null?'—':fmt(item.average_tps)+' tok/s')+'</span>').join('');
     $('chart-range').textContent='最近 '+chartRows.length+' 条有效测速';
     $('error').textContent=(d.warnings||[]).join('；');
     renderChart(chartRows);
