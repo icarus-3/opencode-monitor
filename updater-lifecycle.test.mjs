@@ -4,6 +4,7 @@ function copyBundle(target){fs.mkdirSync(target,{recursive:true});for(const file
 function manifest(root){const files={};for(const base of ['', 'public'])for(const entry of fs.readdirSync(path.join(root,base),{withFileTypes:true})){if(!entry.isFile()||entry.name==='update-manifest.json')continue;const relative=base?base+'/'+entry.name:entry.name;files[relative]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,relative))).digest('hex');}fs.writeFileSync(path.join(root,'update-manifest.json'),JSON.stringify({schema:1,version:'1.3.0-rc.2',files}));}
 test('real Windows update replaces files, backs up SQLite, preserves config/history and restarts one tray',{skip:process.platform!=='win32',timeout:80000},async()=>{
  const parent=fs.mkdtempSync(path.join(os.tmpdir(),'monitor-update-e2e-')),target=path.join(parent,'installed'),packageRoot=path.join(parent,'package');copyBundle(target);copyBundle(packageRoot);manifest(packageRoot);
+ fs.unlinkSync(path.join(target,'UpdateLauncher.exe')); // rc.1 had no native update launcher.
  const p=JSON.parse(fs.readFileSync(path.join(target,'package.json')));p.version='0.0.0';fs.writeFileSync(path.join(target,'package.json'),JSON.stringify(p));
  const config={port:18765,pollSeconds:5,databases:[],logDirectories:[],sshDatabases:[],defaultModel:'all',user_setting:'preserve-me'};fs.writeFileSync(path.join(target,'config.json'),JSON.stringify(config));
  const s=new Store(target,config);s.record('retained',{id:'retained',timestamp:new Date(1000).toISOString(),model:'p/A',input_tokens:100,custom_metric:42});s.db.close();
@@ -12,8 +13,9 @@ test('real Windows update replaces files, backs up SQLite, preserves config/hist
    for(let i=0;i<150&&!fs.existsSync(path.join(target,'data','tray.pid'));i++)await sleep(100);
    assert.ok(fs.existsSync(path.join(target,'data','tray.pid')));
    assert.equal((await(await fetch('http://127.0.0.1:18765/api/health')).json()).version,'0.0.0');
-   const prepared=await stageLocalPackage(packageRoot,target);const result=await launchUpdate(target,prepared,18765);
-   const token=fs.readFileSync(path.join(target,'data','control.token'),'utf8').trim();await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+token}});
+   // The initiating CLI must exit before replacement, as it does in a real local update.
+   const output=execFileSync(process.execPath,[path.join(packageRoot,'update-local.mjs'),target],{windowsHide:true,encoding:'utf8'});
+   const result={backup:output.split('backup: ')[1].trim()};
    let status;for(let i=0;i<300;i++){try{status=JSON.parse(fs.readFileSync(path.join(target,'data','update-status.json'),'utf8').replace(/^\uFEFF/,''));if(['installed','failed'].includes(status.state))break;}catch{}await sleep(100);}
    assert.equal(status?.state,'installed',JSON.stringify(status));
    assert.equal((await(await fetch('http://127.0.0.1:18765/api/health')).json()).version,'1.3.0-rc.2');
@@ -40,6 +42,7 @@ test('failed startup rolls back program files and restarts the old version with 
    let health;for(let i=0;i<100;i++){try{health=await(await fetch('http://127.0.0.1:18765/api/health')).json();if(fs.existsSync(path.join(target,'data','tray.pid')))break;}catch{}await sleep(100);}assert.equal(health?.version,'0.0.0');assert.ok(fs.existsSync(path.join(target,'data','tray.pid')),'restored tray ready before shutdown');
    const next=new Store(target,config);try{assert.equal(next.dashboard().rows[0].custom_metric,42);}finally{next.db.close();}
  }finally{
+   try{const status=JSON.parse(fs.readFileSync(path.join(target,'data','update-status.json'),'utf8').replace(/^\uFEFF/,''));if(status.state==='failed'&&status.helper_pid)process.kill(status.helper_pid);}catch{}
    if(helperPid)try{process.kill(helperPid);}catch{}
    try{const token=fs.readFileSync(path.join(target,'data','control.token'),'utf8').trim();await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+token}});}catch{}
    for(let i=0;i<80&&fs.existsSync(path.join(target,'data','tray.pid'));i++)await sleep(100);if(initial.exitCode===null)initial.kill();

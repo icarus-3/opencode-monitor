@@ -15,6 +15,7 @@ class MonitorTray : ApplicationContext {
     public static string Root;
     [STAThread] static void Main(string[] args) {
         Root=AppDomain.CurrentDomain.BaseDirectory;
+        if(args.Length>2&&args[0]=="--apply-update"){RunUpdateHelper(args);return;}
         Application.EnableVisualStyles();
         bool first;
         var config=new JavaScriptSerializer().Deserialize<System.Collections.Generic.Dictionary<string,object>>(File.ReadAllText(Path.Combine(Root,File.Exists(Path.Combine(Root,"config.json"))?"config.json":"config.example.json")));
@@ -23,6 +24,17 @@ class MonitorTray : ApplicationContext {
             try {Application.Run(new MonitorTray());}
             catch(Exception e){try{Directory.CreateDirectory(Path.Combine(Root,"data"));File.WriteAllText(Path.Combine(Root,"data","startup-error.txt"),e.Message);}catch{}MessageBox.Show(e.Message,"OpenCode Monitor",MessageBoxButtons.OK,MessageBoxIcon.Error);}
         }
+    }
+    static void RunUpdateHelper(string[] args){
+        string log=args[1];
+        try{
+            var quoted=new System.Collections.Generic.List<string>();for(int i=2;i<args.Length;i++)quoted.Add("\""+args[i]+"\"");
+            var info=new ProcessStartInfo("powershell.exe",String.Join(" ",quoted.ToArray()));info.UseShellExecute=false;info.CreateNoWindow=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;
+            using(var process=new Process()){
+                process.StartInfo=info;var gate=new object();DataReceivedEventHandler write=(s,e)=>{if(e.Data!=null)try{lock(gate)File.AppendAllText(log,e.Data+Environment.NewLine);}catch{}};
+                process.OutputDataReceived+=write;process.ErrorDataReceived+=write;process.Start();process.BeginOutputReadLine();process.BeginErrorReadLine();process.WaitForExit();Environment.ExitCode=process.ExitCode;
+            }
+        }catch(Exception e){try{File.AppendAllText(log,"Update launcher: "+e.Message+Environment.NewLine);}catch{}Environment.ExitCode=1;}
     }
     string Read(string path){using(var c=new LocalClient()){c.Proxy=null;return c.DownloadString(url+path);}}
     MonitorTray(){

@@ -2,7 +2,7 @@ param([string]$InstallDir,[string]$StagedDir,[string]$BackupDir,[int]$ServerProc
 $ErrorActionPreference='Stop'
 $InstallDir=[IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
 $statusFile=Join-Path $InstallDir 'data\update-status.json'
-function Status($state,$message){@{state=$state;message=$message;at=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $statusFile -Encoding UTF8}
+function Status($state,$message){@{state=$state;message=$message;helper_pid=$PID;at=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $statusFile -Encoding UTF8}
 $copied=@();$replaced=$false;$newTray=$null
 try{
   Status 'applying' 'Waiting for Monitor to stop'

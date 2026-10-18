@@ -21,7 +21,7 @@ export function safePackagePath(root,relative){
 export function verifyPackage(root){
   const manifest=JSON.parse(fs.readFileSync(path.join(root,'update-manifest.json'),'utf8'));
   if(manifest.schema!==1||!manifest.files||Object.keys(manifest.files).length>300)throw Error('Invalid update manifest');
-  for(const required of ['server.mjs','MonitorTray.exe','package.json','update.ps1','config.example.json'])if(!manifest.files[required])throw Error('Incomplete update package: '+required);
+  for(const required of ['server.mjs','MonitorTray.exe','UpdateLauncher.exe','package.json','update.ps1','config.example.json'])if(!manifest.files[required])throw Error('Incomplete update package: '+required);
   for(const [file,digest]of Object.entries(manifest.files)){
     const target=safePackagePath(root,file);const stat=fs.lstatSync(target);if(!stat.isFile()||stat.isSymbolicLink())throw Error('Invalid package file');
     if(!/^[a-f0-9]{64}$/.test(digest)||crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')!==digest)throw Error('Package checksum mismatch: '+file);
@@ -40,12 +40,12 @@ export async function launchUpdate(root,prepared,port,{readinessAttempts=60}={})
   const dbPath=path.join(root,'data','monitor.sqlite');if(fs.existsSync(dbPath)){const db=new DatabaseSync(dbPath,{readOnly:true});try{db.exec("PRAGMA busy_timeout=5000; VACUUM INTO '"+path.join(backup,'monitor.sqlite').replaceAll("'","''")+"'");}finally{db.close();}}
   const helper=path.join(backup,'apply.ps1');fs.copyFileSync(path.join(prepared.stage,'update.ps1'),helper);
   const readPid=name=>{try{return Number(fs.readFileSync(path.join(root,'data',name),'utf8'))||0;}catch{return 0;}};
-  const args=['-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',helper,'-InstallDir',root,'-StagedDir',prepared.stage,'-BackupDir',backup,'-ServerProcessId',String(readPid('server.pid')),'-TrayProcessId',String(readPid('tray.pid')),'-Port',String(port),'-ReadinessAttempts',String(readinessAttempts)];
-  const log=fs.openSync(path.join(root,'data','update-helper.log'),'a');
-  // PowerShell 5.1 silently exits with -WindowStyle Hidden + DETACHED_PROCESS.
-  // CREATE_NO_WINDOW and unref keep it hidden and independent after parent exit.
+  const launcher=path.join(backup,'UpdateLauncher.exe'),installedLauncher=path.join(root,'UpdateLauncher.exe');fs.copyFileSync(fs.existsSync(installedLauncher)?installedLauncher:path.join(prepared.stage,'UpdateLauncher.exe'),launcher);
+  const args=['--apply-update',path.join(root,'data','update-helper.log'),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper,'-InstallDir',root,'-StagedDir',prepared.stage,'-BackupDir',backup,'-ServerProcessId',String(readPid('server.pid')),'-TrayProcessId',String(readPid('tray.pid')),'-Port',String(port),'-ReadinessAttempts',String(readinessAttempts)];
+  // A detached native winexe owns PowerShell until completion. PowerShell itself
+  // silently exits when launched as DETACHED_PROCESS on Windows PowerShell 5.1.
   let helperPid;
-  try{await new Promise((resolve,reject)=>{const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore',log,log]});child.once('error',reject);child.once('spawn',()=>{helperPid=child.pid;child.unref();resolve();});});}finally{fs.closeSync(log);}
+  await new Promise((resolve,reject)=>{const child=spawn(launcher,args,{windowsHide:true,detached:true,stdio:'ignore'});child.once('error',reject);child.once('spawn',()=>{helperPid=child.pid;child.unref();resolve();});});
   return {version:prepared.version,backup,helperPid};
 }
 export class Updater{
