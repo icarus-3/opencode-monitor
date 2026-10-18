@@ -1,11 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn} from 'node:child_process';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,execFile} from 'node:child_process';import {promisify} from 'node:util';
 import http from 'node:http';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 test('Windows real tray starts hidden server, repeated launches share one listener, secure APIs and shutdown clean up',{skip:process.platform!=='win32',timeout:40000},async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'monitor-lifecycle-'));
  for(const f of fs.readdirSync('.').filter(x=>/\.(mjs|exe|json)$/.test(x)&&!x.includes('template')))fs.copyFileSync(f,path.join(dir,f));
  fs.cpSync('public',path.join(dir,'public'),{recursive:true});
+ fs.copyFileSync('stop.ps1',path.join(dir,'stop.ps1'));
  fs.writeFileSync(path.join(dir,'config.json'),JSON.stringify({port:18765,pollSeconds:5,databases:[],logDirectories:[],sshDatabases:[],defaultModel:'all'}));
  const tray=spawn(path.join(dir,'MonitorTray.exe'),[],{cwd:dir,windowsHide:true,stdio:'ignore'});
  const get=p=>fetch('http://127.0.0.1:18765'+p);let health;
@@ -20,7 +21,8 @@ test('Windows real tray starts hidden server, repeated launches share one listen
  assert.equal((await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST'})).status,403);
  assert.equal((await fetch('http://127.0.0.1:18765/api/history',{headers:{Origin:'https://example.com'}})).status,403);
  const token=fs.readFileSync(path.join(dir,'data','control.token'),'utf8');
- assert.equal((await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+token}})).status,200);
+ fs.renameSync(path.join(dir,'config.json'),path.join(dir,'config.example.json'));
+ await promisify(execFile)('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(dir,'stop.ps1')],{windowsHide:true});
  for(let i=0;i<80&&tray.exitCode===null;i++)await sleep(150);
  assert.notEqual(tray.exitCode,null);await assert.rejects(()=>get('/api/health'));
  }finally{if(tray.exitCode===null)tray.kill();}

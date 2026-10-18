@@ -1,24 +1,24 @@
-✔ installed OpenCode V1 and desktop V2 load the same plugin without wrapper scripts (12955.6655ms)
-✔ Windows installer imports legacy history and writes startup plugin without touching global config (524.2188ms)
-✔ Windows real tray starts hidden server, repeated launches share one listener, secure APIs and shutdown clean up (2489.2708ms)
-✔ port conflict produces a visible diagnostic and leaves the other service untouched (170.4487ms)
-✔ default all includes every model and export pagination keeps all rows (60.9824ms)
-✔ same id updates archive history and preserve benchmark-only fields (49.4787ms)
-✔ late and out-of-order timing recomputes a message behind the watermark, duplicates are idempotent (90.9268ms)
-✔ V2 and local log errors canonicalize while raw representations remain available (48.9519ms)
-✔ malformed timing events cannot create remote undefined identities (50.011ms)
-✔ in-place legacy migration backs up SQLite and preserves opaque legacy fields (76.8682ms)
-✔ explicit history import backs up source and destination, collision loses no fields (123.1131ms)
-✔ seed import is opt-in data, restores frozen baselines, repeats safely (55.8738ms)
-✔ privacy projection rejects message, tool, credential and nested metadata payloads (0.326ms)
-✔ outlier filtering and frontend history limits do not discard tokens or source records (0.4366ms)
-✔ SSH projected content hash detects old-row changes without changing count/update/seq; no body transferred (278.1835ms)
-✔ SSH log projection retains stream/errors/compaction and strips secrets (52.2873ms)
-✔ metrics use reasoning + text, summed input, stream timestamp; missing start stays null (1.0146ms)
-✔ no bundled personal history is imported by default (44.516ms)
-✔ incremental source ingestion: completion updates, deduplication, real 429 vs timestamp digits, rotation (108.8894ms)
-✔ conservative sustained decrease detector: isolated dip vs prolonged drop (0.4839ms)
-✔ automatic XDG discovery and explicit paths; empty history stays empty (44.4822ms)
+✔ installed OpenCode V1 and desktop V2 load the same plugin without wrapper scripts (11166.734ms)
+✔ Windows installer imports legacy history and writes startup plugin without touching global config (517.6553ms)
+✔ Windows real tray starts hidden server, repeated launches share one listener, secure APIs and shutdown clean up (2407.3057ms)
+✔ port conflict produces a visible diagnostic and leaves the other service untouched (174.3259ms)
+✔ default all includes every model and export pagination keeps all rows (53.904ms)
+✔ same id updates archive history and preserve benchmark-only fields (49.3537ms)
+✔ late and out-of-order timing recomputes a message behind the watermark, duplicates are idempotent (89.9356ms)
+✔ V2 and local log errors canonicalize while raw representations remain available (48.9271ms)
+✔ malformed timing events cannot create remote undefined identities (42.8736ms)
+✔ in-place legacy migration backs up SQLite and preserves opaque legacy fields (71.2873ms)
+✔ explicit history import backs up source and destination, collision loses no fields (135.839ms)
+✔ seed import is opt-in data, restores frozen baselines, repeats safely (56.9298ms)
+✔ privacy projection rejects message, tool, credential and nested metadata payloads (0.3328ms)
+✔ outlier filtering and frontend history limits do not discard tokens or source records (0.4382ms)
+✔ SSH projected content hash detects old-row changes without changing count/update/seq; no body transferred (292.9889ms)
+✔ SSH log projection retains stream/errors/compaction and strips secrets (49.3712ms)
+✔ metrics use reasoning + text, summed input, stream timestamp; missing start stays null (1.0348ms)
+✔ no bundled personal history is imported by default (44.2492ms)
+✔ incremental source ingestion: completion updates, deduplication, real 429 vs timestamp digits, rotation (111.036ms)
+✔ conservative sustained decrease detector: isolated dip vs prolonged drop (0.5157ms)
+✔ automatic XDG discovery and explicit paths; empty history stays empty (44.4248ms)
 ℹ tests 21
 ℹ suites 0
 ℹ pass 21
@@ -26,4 +26,4 @@
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 17462.1795
+ℹ duration_ms 15599.2589
