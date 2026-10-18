@@ -128,7 +128,8 @@ async function loadHistory(){
 $('history-details').addEventListener('toggle',loadHistory);$('history-model').addEventListener('change',loadHistory);
 async function checkUpdate(force=false){
   $('check-update').disabled=true;
-  try{const r=await fetch('/api/update'+(force?'?force=1':''));if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();$('app-version').textContent='版本 '+d.current;$('update-status').textContent=d.error?'检查失败：'+d.error:d.available?'发现新版本 '+d.latest:'已是最新版本';$('install-update').hidden=!d.available;}catch(e){$('update-status').textContent='检查失败：'+e.message;}finally{$('check-update').disabled=false;}
+  $('install-update').hidden=true;
+  try{const r=await fetch('/api/update'+(force?'?force=1':''));if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();$('app-version').textContent='版本 '+d.current;$('update-status').textContent=d.error?'检查失败：'+d.error:d.available?'发现新版本 '+d.latest:'已是最新版本';if(!d.error&&d.source==='github-releases-feed')$('update-status').textContent+=' · 已通过备用发布源检查';$('install-update').hidden=!!d.error||!d.available;}catch(e){$('update-status').textContent='检查失败：'+e.message;}finally{$('check-update').disabled=false;}
 }
 $('check-update').addEventListener('click',()=>checkUpdate(true));
 $('install-update').addEventListener('click',async()=>{

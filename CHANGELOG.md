@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0-rc.4 — 2026-10-18
+
+- Change new-install default port to 28765; existing configuration is preserved. Tray, startup plugins, stop and update helpers continue to follow config.port. The user installation was moved from 8765 without stopping OpenCode or deleting history.
+- Recover from GitHub API rate limits and outages using the same repository's official Atom release feed and versioned SHA256SUMS asset. Verify ZIP and per-file checksums on either channel; require no credentials, extra runtime or third-party mirror.
+- Honor rate reset and Retry-After across manual checks and process restarts. Show successful fallback in the compact frontend; retain a visible failure when both sources fail.
+- Add regressions for 403/429, persistent cooldown, network errors, malformed metadata, foreign links, checksum ambiguity, tampered downloads and release channels.
+
 ## 1.3.0-rc.3 — 2026-10-18
 
 - Fix desktop reopening against a persistent OpenCode backend with a user-session Windows window event bridge owned by the plugin host. No process polling, scheduled tasks or login startup. Match approved executable paths and deduplicate desktop process identities; respect explicit Monitor quit until the next desktop process launch.

@@ -1,4 +1,4 @@
-# OpenCode Monitor 1.3.0-rc.3
+# OpenCode Monitor 1.3.0-rc.4
 
 完整保留可获得的性能元数据，让人只看简洁前端，让 AI 读取详细历史。只读 OpenCode 数据库和日志；不调用模型，不保存提示词、回复正文、工具输入输出或鉴权头。
 
@@ -12,17 +12,21 @@ A→B 会重新计算本轮均速、曲线、Token 用量和 1000 万 Token 区�
 
 ## 在线和本地更新
 
-页面打开时自动检查此仓库的 GitHub Releases，也可点击“检查更新”；发现新版本后显示“一键更新”。用户点击后才下载和安装，不自动静默替换。更新源固定为 [icarus-3/opencode-monitor](https://github.com/icarus-3/opencode-monitor)，验证 GitHub 资产 SHA256 和包内每个文件的清单，拒绝路径穿越、重复 ZIP 项、符号链接、个人 config.json、数据库和 seed。正式版渠道不自动转入 RC，RC 渠道可以接收后续 RC 或正式版。
+页面打开时自动检查此仓库的 GitHub Releases，也可点击“检查更新”；发现新版本后显示“一键更新”。用户点击后才下载和安装，不自动静默替换。更新源固定为 [icarus-3/opencode-monitor](https://github.com/icarus-3/opencode-monitor)，验证包 SHA256 和包内每个文件的清单，拒绝路径穿越、重复 ZIP 项、符号链接、个人 config.json、数据库和 seed。正式版渠道不自动转入 RC，RC 渠道可以接收后续 RC 或正式版。
+
+rc.4 修复未登录 GitHub API 额度耗尽时的 403：API 失败后改读同一仓库的官方 releases.atom 订阅，发现新版后读取该版本的 SHA256SUMS 校验文件。不使用第三方镜像，不需要登录、令牌或 gh。API 通道使用 GitHub asset digest；备用通道使用仓库发布的 SHA256SUMS；两个通道都校验实际 ZIP 字节和包内逐文件清单。缺少、重复或无效校验值时拒绝安装。若两个通道均不可用，显示真实错误，不伪报“已是最新版本”。
+
+遵守 X-RateLimit-Reset 和 Retry-After：等待时间保存在 data/update-check-cache.json，手动强制检查和重启 Monitor 也不会在等待期反复请求受限 API，而是检查公开发布订阅。该文件只保存重试时间，不保存凭据。检查成功缓存 5 分钟；备用通道在前端显示“已通过备用发布源检查”。维护者每次发布须继续附上 build-release.mjs 生成的 SHA256SUMS-版本.txt，Atom 由 GitHub 自动维护，无需另建清单分支。参考 [GitHub API 限流说明](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)。
 
 更新前一致性备份 SQLite 至 data/update-backups/，并备份被替换的程序文件。等待后台及托盘停止后替换程序，保留配置、全部历史、插件路径及 App 浏览器资料，随后后台重启。失败时尝试恢复程序文件；数据库备份保留供恢复，不自动倒退或覆盖采集数据。诊断在 data/update-status.json 和 data/update-helper.log。关闭页面不取消已启动的更新辅助程序。
 
-rc.1 尚无应用内更新按钮，首次升级需使用本地更新包：解压 opencode-monitor-1.3.0-rc.3-update.zip 到安装目录外，在解压后的项目目录执行：
+rc.1 尚无应用内更新按钮，首次升级需使用本地更新包：解压 opencode-monitor-1.3.0-rc.4-update.zip 到安装目录外，在解压后的项目目录执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\apply-update.ps1 -InstallDir D:\OpenCode\opencode-monitor-v1.3.0-rc.1
 ```
 
-它会自动停止旧服务并更新原目录；目录名保留旧名称，实际版本以页面/health/package.json 为准。需要 Node 24 和 Windows 内置 PowerShell，无管理员要求。首次新安装仍使用 install.ps1。离线更新验证包内清单并拒绝降级；下载包可先与 SHA256SUMS-1.3.0-rc.3.txt 核对。
+它会自动停止旧服务并更新原目录；目录名保留旧名称，实际版本以页面/health/package.json 为准。需要 Node 24 和 Windows 内置 PowerShell，无管理员要求。首次新安装仍使用 install.ps1。离线更新验证包内清单并拒绝降级；下载包可先与 SHA256SUMS-1.3.0-rc.4.txt 核对。
 
 托盘单击或“打开监控界面（默认浏览器）”始终尊重 Windows 默认浏览器，包括 Chrome；不修改默认设置。“打开 App 窗口”为可选浏览器应用模式：默认浏览器是 Chrome/Edge 时使用对应引擎，否则尝试本机 Edge，再回退默认浏览器。它隐藏地址栏和标签栏，使用独立资料目录，关闭窗口仍保留后台。该模式不是额外捆绑 Electron 的原生 UI。
 
@@ -46,7 +50,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -InstallDi
 
 插件安装到 `~/.config/opencode/plugins/opencode-monitor.js`、当前 `XDG_CONFIG_HOME/opencode/plugins`（若设置）及显式提供的目录。安装器备份同名插件，保留现有 config，改默认模型为 all，并合并 auto 来源发现。其他自定义配置目录需要显式传入；`--pure` 会禁用外部插件。`data/installed-plugins.json` 记录实际安装位置。
 
-托盘位于 Windows 通知区域，也可能收在 `^` 隐藏图标中；图标是否固定显示由 Windows 设置决定。单击打开 `http://127.0.0.1:8765`，右键有“打开监控界面 / 状态 / 退出监控器”。关闭浏览器不停止后台；退出菜单停止 Monitor 和托盘，不停止 OpenCode。重复启动复用同一端口实例。端口被其他程序占用、Node 不可用或启动失败会弹出诊断，日志位于 data/tray.log。
+托盘位于 Windows 通知区域，也可能收在 `^` 隐藏图标中；图标是否固定显示由 Windows 设置决定。默认单击打开 `http://127.0.0.1:28765`，实际地址跟随 config.json 的 port，右键有“打开监控界面 / 状态 / 退出监控器”。关闭浏览器不停止后台；退出菜单停止 Monitor 和托盘，不停止 OpenCode。重复启动复用同一端口实例。端口被其他程序占用、Node 不可用或启动失败会弹出诊断，日志位于 data/tray.log。
+
+rc.4 的新安装默认端口改为 28765，释放常用的 8765。本机已经迁移；其他既有安装升级仍保留原 config.json，不强制改用户端口。需要迁移时先停止 Monitor，备份 config.json，设置 port 为已确认空闲的端口，再启动 Monitor；插件、托盘、停止脚本和更新器均读取该配置。原端口不保留重定向监听，以便其他项目立即使用；浏览器旧标签页需改用新地址。
 
 手动运行 `MonitorTray.exe`、start.cmd 或 start.ps1 均保持后台运行；双击 start.vbs 不出现终端窗口。`stop.cmd`/stop.ps1 使用本地控制令牌停止后台，托盘随即退出。`node server.mjs` 仍可用于前台调试，Ctrl+C 停止。安装目录需当前用户可写，Node 需在 PATH 中，也可自行放入 runtime/node.exe。
 
@@ -99,7 +105,7 @@ schema 版本为 2，提取器版本为 5。升级前的指标标为 legacy_deri
 
 ## AI API 和导出
 
-全部 HTTP 接口只监听 127.0.0.1，默认 8765，无跨域许可。不要把端口转发到公网。它们包含本机路径、会话标识和用量，适合本机 AI 使用。
+全部 HTTP 接口只监听 127.0.0.1，默认 28765，无跨域许可。不要把端口转发到公网。它们包含本机路径、会话标识和用量，适合本机 AI 使用。
 
 - `/api/dashboard?model=all&from=2026-10-17T00:00:00Z&to=2026-10-19T00:00:00Z`：兼容完整派生指标、基准、事件、诊断和简洁前端。
 - `/api/history?limit=1000&after=0`：原始当前指标 JSON，不受曲线 120 条限制。
@@ -145,4 +151,4 @@ npm test
 
 ## 发布
 
-当前为 1.3.0-rc.3。Windows 安装包与本地更新包使用相同程序和逐文件清单，含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。开发者可先运行 build.ps1，再用 node build-release.mjs OUTPUT_DIRECTORY 生成两种包和 SHA256SUMS。保持 rc，直到已声明的支持边界获得更多现场验证。
+当前为 1.3.0-rc.4。Windows 安装包与本地更新包使用相同程序和逐文件清单，含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。开发者可先运行 build.ps1，再用 node build-release.mjs OUTPUT_DIRECTORY 生成两种包和 SHA256SUMS。每次发布须同时上传两个包及 SHA256SUMS，以支持 API 受限时的安全更新。保持 rc，直到已声明的支持边界获得更多现场验证。

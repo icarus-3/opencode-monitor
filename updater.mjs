@@ -1,6 +1,30 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {execFile,spawn} from 'node:child_process';import {promisify} from 'node:util';import {DatabaseSync} from 'node:sqlite';
 const exec=promisify(execFile);
 export const REPOSITORY='icarus-3/opencode-monitor';
+export const RELEASES_URL=`https://github.com/${REPOSITORY}/releases`;
+export function parseReleaseFeed(text){
+  if(!text.includes(`<id>tag:github.com,2008:${RELEASES_URL}</id>`)||!/<feed\b/.test(text))throw Error('Invalid GitHub release feed');
+  const releases=[];
+  for(const entry of text.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/g)){
+    for(const link of entry[1].matchAll(/<link\b[^>]*>/g)){
+      if(!/\brel=["']alternate["']/.test(link[0]))continue;
+      const url=link[0].match(/\bhref=["']([^"']+)["']/)?.[1];
+      if(!url?.startsWith(RELEASES_URL+'/tag/'))continue;
+      const tag=url.slice((RELEASES_URL+'/tag/').length),version=tag.replace(/^v/,'');
+      try{compareVersions(version,version);}catch{continue;}
+      const name=`opencode-monitor-${version}-windows-x64.zip`;
+      releases.push({tag_name:tag,draft:false,prerelease:version.includes('-rc.'),html_url:url,assets:[{name,browser_download_url:`${RELEASES_URL}/download/${tag}/${name}`} ]});break;
+    }
+  }
+  if(!releases.length)throw Error('GitHub feed has no supported releases');return releases;
+}
+export function releaseChecksum(text,filename){
+  const matches=text.replace(/^\uFEFF/,'').split(/\r?\n/).map(line=>line.match(/^([a-fA-F0-9]{64})[ \t]+\*?([^\r\n]+)$/)).filter(m=>m&&m[2]===filename);
+  if(matches.length!==1)throw Error('Missing or ambiguous release SHA256 checksum');return 'sha256:'+matches[0][1].toLowerCase();
+}
+async function limitedText(response,limit=1024*1024){
+  let size=0;const chunks=[];for await(const chunk of response.body){size+=chunk.length;if(size>limit)throw Error('Update metadata exceeds limit');chunks.push(chunk);}return Buffer.concat(chunks).toString('utf8');
+}
 export function compareVersions(a,b){
   const parse=v=>String(v).replace(/^v/,'').match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
   const x=parse(a),y=parse(b);if(!x||!y)throw Error('Unsupported version format');
@@ -49,11 +73,43 @@ export async function launchUpdate(root,prepared,port,{readinessAttempts=60}={})
   return {version:prepared.version,backup,helperPid};
 }
 export class Updater{
-  constructor(root,{fetcher=fetch,current}={}){this.root=root;this.fetcher=fetcher;this.current=current??JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;this.cached=null;this.pending=null;this.applying=false;}
+  constructor(root,{fetcher=fetch,current,now=Date.now}={}){
+    this.root=root;this.fetcher=fetcher;this.now=now;this.current=current??JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;this.cached=null;this.pending=null;this.applying=false;this.apiRetryAt=0;
+    this.cachePath=path.join(root,'data','update-check-cache.json');
+    try{const saved=JSON.parse(fs.readFileSync(this.cachePath,'utf8'));if(Number.isFinite(saved.apiRetryAt))this.apiRetryAt=Math.min(saved.apiRetryAt,this.now()+86400000);}catch{}
+  }
+  saveBackoff(){try{fs.mkdirSync(path.dirname(this.cachePath),{recursive:true});fs.writeFileSync(this.cachePath,JSON.stringify({apiRetryAt:this.apiRetryAt}));}catch{}}
   async check(force=false){
-    if(!force&&this.cached&&Date.now()-this.cached.checked<300000)return this.cached;
+    if(!force&&this.cached&&this.now()-this.cached.checked<300000)return this.cached;
     if(this.pending)return this.pending;
-    this.pending=(async()=>{const response=await this.fetcher(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=30`,{headers:{Accept:'application/vnd.github+json','User-Agent':'OpenCode-Monitor'},signal:AbortSignal.timeout(8000)});if(!response.ok)throw Error('GitHub HTTP '+response.status);const releases=await response.json();if(!Array.isArray(releases))throw Error('Invalid release response');const release=selectRelease(releases,this.current);this.cached={current:this.current,available:!!release,latest:release?.tag_name.replace(/^v/,''),url:release?.html_url,checked:Date.now(),release};return this.cached;})().finally(()=>{this.pending=null;});return this.pending;
+    this.pending=(async()=>{
+      let releases,source='github-api',apiError='GitHub API 暂处等待期';
+      if(this.now()>=this.apiRetryAt){
+        try{
+          const response=await this.fetcher(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=30`,{headers:{Accept:'application/vnd.github+json','User-Agent':'OpenCode-Monitor'},signal:AbortSignal.timeout(8000)});
+          if(!response.ok){
+            const reset=Number(response.headers.get('x-ratelimit-reset'))*1000,retry=response.headers.get('retry-after');
+            const retryAt=retry?(Number.isFinite(Number(retry))?this.now()+Number(retry)*1000:Date.parse(retry)):0;
+            this.apiRetryAt=Math.min(this.now()+86400000,Math.max(this.now()+60000,Number.isFinite(reset)?reset:0,Number.isFinite(retryAt)?retryAt:0));this.saveBackoff();
+            throw Error(response.status===403||response.status===429?'GitHub API 请求受限':'GitHub API HTTP '+response.status);
+          }
+          const parsed=JSON.parse(await limitedText(response));if(!Array.isArray(parsed)||parsed.some(r=>!r||typeof r.tag_name!=='string'||!Array.isArray(r.assets)))throw Error('Invalid release response');releases=parsed;this.apiRetryAt=0;this.saveBackoff();
+        }catch(e){apiError=e.message;if(!this.apiRetryAt){this.apiRetryAt=this.now()+60000;this.saveBackoff();}}
+      }
+      if(!releases){
+        source='github-releases-feed';
+        try{const response=await this.fetcher(RELEASES_URL+'.atom',{headers:{Accept:'application/atom+xml','User-Agent':'OpenCode-Monitor'},signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('发布订阅 HTTP '+response.status);releases=parseReleaseFeed(await limitedText(response));}
+        catch(e){throw Error(apiError+'；备用发布源不可用：'+e.message+'。可稍后重试或访问 '+RELEASES_URL);}
+      }
+      const release=selectRelease(releases,this.current);
+      if(release&&source==='github-releases-feed'){
+        const version=release.tag_name.replace(/^v/,''),asset=release.assets[0];
+        const response=await this.fetcher(`${RELEASES_URL}/download/${release.tag_name}/SHA256SUMS-${version}.txt`,{signal:AbortSignal.timeout(10000)});
+        if(!response.ok)throw Error('发布校验文件暂不可用（HTTP '+response.status+'），请稍后重试');
+        asset.digest=releaseChecksum(await limitedText(response,65536),asset.name);asset.digest_source='repository-release-checksums';
+      }
+      this.cached={current:this.current,available:!!release,latest:release?.tag_name.replace(/^v/,''),url:release?.html_url??RELEASES_URL,checked:this.now(),source,api_retry_at:this.apiRetryAt||undefined,release};return this.cached;
+    })().finally(()=>{this.pending=null;});return this.pending;
   }
   async prepare(){
     if(this.applying)throw Error('Update already in progress');this.applying=true;

@@ -1,7 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {Updater,compareVersions,selectRelease,safePackagePath,verifyPackage,stageLocalPackage} from './updater.mjs';
 import {execFileSync} from 'node:child_process';
+import {parseReleaseFeed,releaseChecksum,RELEASES_URL} from './updater.mjs';
 const temp=()=>fs.mkdtempSync(path.join(os.tmpdir(),'monitor-update-'));
 const release=(version,prerelease=true)=>({tag_name:'v'+version,prerelease,assets:[{name:`opencode-monitor-${version}-windows-x64.zip`,browser_download_url:`https://github.com/icarus-3/opencode-monitor/releases/download/v${version}/opencode-monitor-${version}-windows-x64.zip`,digest:'sha256:'+'0'.repeat(64)}]});
+const atom=(versions=['1.3.0-rc.4'])=>`<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><id>tag:github.com,2008:${RELEASES_URL}</id>${versions.map(v=>`<entry><title>arbitrary title</title><link rel="alternate" href="${RELEASES_URL}/tag/v${v}"/></entry>`).join('')}</feed>`;
 test('version checks compare numeric RC versions and retain the stable update channel',()=>{assert.ok(compareVersions('1.3.0-rc.12','1.3.0-rc.2')>0);assert.ok(compareVersions('1.3.0','1.3.0-rc.12')>0);assert.equal(selectRelease([release('1.4.0-rc.1')],'1.3.0'),undefined);assert.equal(selectRelease([release('1.3.0-rc.2'),release('1.3.0',false)],'1.3.0-rc.1').tag_name,'v1.3.0');});
 test('update paths reject traversal, absolute paths, personal data and config overwrites',()=>{for(const file of ['../a','/a','C:/a','public/../../a','data/monitor.sqlite','seed/measurements.json','config.json','public\\app.js'])assert.throws(()=>safePackagePath(temp(),file));assert.ok(safePackagePath(temp(),'public/app.js'));});
 function fixture(){const dir=temp(),files={};for(const name of ['server.mjs','MonitorTray.exe','UpdateLauncher.exe','package.json','update.ps1','config.example.json']){const data=name==='package.json'?JSON.stringify({version:'1.3.0-rc.2'}):name;fs.writeFileSync(path.join(dir,name),data);files[name]=crypto.createHash('sha256').update(data).digest('hex');}fs.writeFileSync(path.join(dir,'update-manifest.json'),JSON.stringify({schema:1,version:'1.3.0-rc.2',files}));return dir;}
@@ -9,6 +11,29 @@ test('local update verifies every file before staging and never copies user conf
 test('update manifest cannot introduce data or config files even with a matching checksum',()=>{const dir=fixture(),m=JSON.parse(fs.readFileSync(path.join(dir,'update-manifest.json')));m.files['data/monitor.sqlite']='0'.repeat(64);fs.writeFileSync(path.join(dir,'update-manifest.json'),JSON.stringify(m));assert.throws(()=>verifyPackage(dir),/personal/);});
 test('release checks cache results and downloading rejects modified bytes before extraction',async()=>{let calls=0;const root=temp();const u=new Updater(root,{current:'1.3.0-rc.1',fetcher:async url=>{calls++;if(url.includes('api.github.com'))return new Response(JSON.stringify([release('1.3.0-rc.2')]),{status:200});return new Response('tampered',{status:200});}});assert.equal((await u.check()).latest,'1.3.0-rc.2');await u.check();assert.equal(calls,1);await assert.rejects(()=>u.prepare(),/checksum/);assert.equal(u.applying,false);});
 test('update source is pinned to the user repository and a GitHub digest is mandatory',async()=>{const bad=release('1.3.0-rc.2');bad.assets[0].browser_download_url='https://example.com/a.zip';const u=new Updater(temp(),{current:'1.3.0-rc.1',fetcher:async()=>new Response(JSON.stringify([bad]))});await assert.rejects(()=>u.prepare(),/source/);bad.assets[0].browser_download_url=release('1.3.0-rc.2').assets[0].browser_download_url;delete bad.assets[0].digest;await assert.rejects(()=>u.prepare(),/digest/);});
+test('GitHub 403 falls back to official Atom and checksums; manual checks and restart honor rate reset',async()=>{
+ const root=temp();let apiCalls=0,feedCalls=0,time=1000000;
+ const fetcher=async url=>{if(url.includes('api.github.com')){apiCalls++;return new Response('limited',{status:403,headers:{'x-ratelimit-remaining':'0','x-ratelimit-reset':'4600'}});}if(url.endsWith('.atom')){feedCalls++;return new Response(atom());}return new Response('a'.repeat(64)+'  opencode-monitor-1.3.0-rc.4-windows-x64.zip\n');};
+ const options={current:'1.3.0-rc.3',fetcher,now:()=>time};const u=new Updater(root,options),info=await u.check();assert.equal(info.latest,'1.3.0-rc.4');assert.equal(info.source,'github-releases-feed');assert.equal(info.release.assets[0].digest,'sha256:'+'a'.repeat(64));await u.check();assert.equal(feedCalls,1);
+ await u.check(true);assert.equal(apiCalls,1);await new Updater(root,options).check(true);assert.equal(apiCalls,1);assert.equal(feedCalls,3);time=4600001;await u.check(true);assert.equal(apiCalls,2);
+});
+test('network API failure uses feed without credentials, enforces channel and retries after wait',async()=>{
+ let calls=0;const u=new Updater(temp(),{current:'1.3.0',fetcher:async(url,options)=>{assert.equal(options?.headers?.Authorization,undefined);if(url.includes('api.github.com')){calls++;throw Error('offline API');}return new Response(atom(['1.4.0-rc.1','1.3.0']));}});const d=await u.check();assert.equal(d.available,false);assert.equal(d.source,'github-releases-feed');await u.check(true);assert.equal(calls,1);
+});
+test('failure of both sources remains a visible failure, never a false latest-version result',async()=>{
+ const u=new Updater(temp(),{current:'1.3.0-rc.3',fetcher:async()=>new Response('denied',{status:403})});await assert.rejects(()=>u.check(),/备用发布源不可用/);assert.equal(u.cached,null);
+});
+test('invalid successful API response falls back instead of being used as a release list',async()=>{
+ const u=new Updater(temp(),{current:'1.3.0-rc.4',fetcher:async url=>new Response(url.includes('api.github.com')?'{}':atom())});assert.equal((await u.check()).source,'github-releases-feed');
+});
+test('official feed parser ignores injected foreign links and rejects malformed feed and unsupported tags',()=>{
+ assert.throws(()=>parseReleaseFeed('<feed><entry/></feed>'),/Invalid/);assert.throws(()=>parseReleaseFeed(atom(['../../evil'])),/supported/);
+ const xml=atom(['1.3.0-rc.4']).replace('</feed>','<entry><link rel="alternate" href="https://evil.example/releases/tag/v9.0.0"/></entry></feed>');assert.deepEqual(parseReleaseFeed(xml).map(r=>r.tag_name),['v1.3.0-rc.4']);
+ const name='opencode-monitor-1.3.0-rc.4-windows-x64.zip',line='A'.repeat(64)+'  '+name;assert.equal(releaseChecksum(line,name),'sha256:'+'a'.repeat(64));assert.throws(()=>releaseChecksum(line+'\n'+line,name),/ambiguous/);assert.throws(()=>releaseChecksum('a'.repeat(64)+'  other.zip',name),/Missing/);
+});
+test('fallback discovery still rejects altered package bytes and missing checksum before extraction',async()=>{
+ let valid=true;const u=new Updater(temp(),{current:'1.3.0-rc.3',fetcher:async url=>{if(url.includes('api.github.com'))return new Response('limited',{status:429,headers:{'retry-after':'600'}});if(url.endsWith('.atom'))return new Response(atom());if(url.endsWith('.txt'))return new Response(valid?'0'.repeat(64)+'  opencode-monitor-1.3.0-rc.4-windows-x64.zip':'invalid');return new Response('modified bytes');}});await assert.rejects(()=>u.prepare(),/checksum/);valid=false;await assert.rejects(()=>u.check(true),/checksum/);assert.equal(u.applying,false);
+});
 test('Windows archive staging rejects traversal before extracting any file',{skip:process.platform!=='win32'},()=>{
  const root=temp(),zip=path.join(root,'unsafe.zip'),dest=path.join(root,'unpacked');
  const script=`Add-Type -AssemblyName System.IO.Compression.FileSystem;Add-Type -AssemblyName System.IO.Compression;$z=[IO.Compression.ZipFile]::Open('${zip.replaceAll("'","''")}',[IO.Compression.ZipArchiveMode]::Create);$z.CreateEntry('opencode-monitor/../escape.txt') | Out-Null;$z.Dispose()`;
