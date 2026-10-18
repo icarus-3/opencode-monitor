@@ -20,6 +20,9 @@ test('Windows real tray starts hidden server, repeated launches share one listen
  assert.equal((await get('/')).status,200);assert.equal((await get('/api/diagnostics')).status,200);
  assert.equal((await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST'})).status,403);
  assert.equal((await fetch('http://127.0.0.1:18765/api/history',{headers:{Origin:'https://example.com'}})).status,403);
+ assert.equal((await fetch('http://127.0.0.1:18765/api/measurement/reset',{method:'POST'})).status,403);
+ assert.equal((await fetch('http://127.0.0.1:18765/api/update/install',{method:'POST',headers:{Origin:'https://example.com','X-Monitor-Action':'update'}})).status,403);
+ assert.equal((await fetch('http://127.0.0.1:18765/api/measurement/reset',{method:'POST',headers:{Origin:'http://127.0.0.1:18765','X-Monitor-Action':'reset'}})).status,200);
  const token=fs.readFileSync(path.join(dir,'data','control.token'),'utf8');
  fs.renameSync(path.join(dir,'config.json'),path.join(dir,'config.example.json'));
  await promisify(execFile)('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(dir,'stop.ps1')],{windowsHide:true});

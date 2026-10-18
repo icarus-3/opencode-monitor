@@ -1,6 +1,30 @@
-# OpenCode Monitor 1.3.0-rc.1
+# OpenCode Monitor 1.3.0-rc.2
 
 完整保留可获得的性能元数据，让人只看简洁前端，让 AI 读取详细历史。只读 OpenCode 数据库和日志；不调用模型，不保存提示词、回复正文、工具输入输出或鉴权头。
+
+## 当前测速与历史详情
+
+首页只显示本轮测速。首次安装或从 rc.1 升级到 rc.2 时创建独立测速起点；自动发现的 OpenCode 旧记录、导入的历史和 benchmark 均保留在数据库中，但不填入当前测速卡片。新调用开始后才出现当前模型和速度；模型按完整 provider/model 标识区分，不按显示名称合并。
+
+A→B 会重新计算本轮均速、曲线、Token 用量和 1000 万 Token 区间；B→A 也从新一轮开始。B 缺少可靠计时时显示等待，不显示 A 的旧速度。“重新测速”重新设置起点，不删除任何历史；重启程序保留该起点。本轮异常值判断也独立计算，不沿用旧轮次的阈值。多来源并发时以最近实际调用的模型确定当前一轮，来源模型交错也会分轮；仅在 OpenCode 界面预选模型、尚未产生新调用时无法提前识别。
+
+首页新增本轮最近 20 条记录；“显示详情”展开输入、耗时、TTFT 和来源。“历史详情”可按模型查看旧记录，不影响当前测速；完整 AI API/导出继续保留全部历史。GET /api/measurement 返回当前测速及历史模型列表；原 /api/dashboard 默认 all 的完整历史口径保持兼容。POST /api/measurement/reset 仅允许同源带 X-Monitor-Action: reset 的交互。
+
+## 在线和本地更新
+
+页面打开时自动检查此仓库的 GitHub Releases，也可点击“检查更新”；发现新版本后显示“一键更新”。用户点击后才下载和安装，不自动静默替换。更新源固定为 [icarus-3/opencode-monitor](https://github.com/icarus-3/opencode-monitor)，验证 GitHub 资产 SHA256 和包内每个文件的清单，拒绝路径穿越、重复 ZIP 项、符号链接、个人 config.json、数据库和 seed。正式版渠道不自动转入 RC，RC 渠道可以接收后续 RC 或正式版。
+
+更新前一致性备份 SQLite 至 data/update-backups/，并备份被替换的程序文件。等待后台及托盘停止后替换程序，保留配置、全部历史、插件路径及 App 浏览器资料，随后后台重启。失败时尝试恢复程序文件；数据库备份保留供恢复，不自动倒退或覆盖采集数据。诊断在 data/update-status.json 和 data/update-helper.log。关闭页面不取消已启动的更新辅助程序。
+
+rc.1 尚无应用内更新按钮，首次升级需使用本地更新包：解压 opencode-monitor-1.3.0-rc.2-update.zip 到安装目录外，在解压后的项目目录执行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\apply-update.ps1 -InstallDir D:\OpenCode\opencode-monitor-v1.3.0-rc.1
+```
+
+它会自动停止旧服务并更新原目录；目录名保留旧名称，实际版本以页面/health/package.json 为准。需要 Node 24 和 Windows 内置 PowerShell，无管理员要求。首次新安装仍使用 install.ps1。离线更新验证包内清单并拒绝降级；下载包可先与 SHA256SUMS-1.3.0-rc.2.txt 核对。
+
+托盘单击或“打开监控界面（默认浏览器）”始终尊重 Windows 默认浏览器，包括 Chrome；不修改默认设置。“打开 App 窗口”为可选浏览器应用模式：默认浏览器是 Chrome/Edge 时使用对应引擎，否则尝试本机 Edge，再回退默认浏览器。它隐藏地址栏和标签栏，使用独立资料目录，关闭窗口仍保留后台。该模式不是额外捆绑 Electron 的原生 UI。
 
 ## Windows 11 安装
 
@@ -109,4 +133,4 @@ npm test
 
 ## 发布
 
-当前为 1.3.0-rc.1。Windows 产物包含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。保持 rc，直到已声明的支持边界获得更多现场验证。GitHub 发布需要目标仓库写权限；本地 tag 不等于 GitHub Release 已发布。
+当前为 1.3.0-rc.2。Windows 安装包与本地更新包使用相同程序和逐文件清单，含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。开发者可先运行 build.ps1，再用 node build-release.mjs OUTPUT_DIRECTORY 生成两种包和 SHA256SUMS。保持 rc，直到已声明的支持边界获得更多现场验证。

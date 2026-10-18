@@ -6,6 +6,8 @@ using System.Net;
 using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
+using Microsoft.Win32;
+using System.Text.RegularExpressions;
 
 class MonitorTray : ApplicationContext {
     NotifyIcon icon; Process child; string root, url, token; bool closing; System.Windows.Forms.Timer timer;
@@ -31,7 +33,8 @@ class MonitorTray : ApplicationContext {
         icon=new NotifyIcon();icon.Icon=SystemIcons.Application;icon.Text="OpenCode Monitor: starting";icon.Visible=true;
         icon.MouseClick+=(s,e)=>{Log("Tray click "+e.Button);if(e.Button==MouseButtons.Left)Open();};
         var menu=new ContextMenuStrip();
-        menu.Items.Add("打开监控界面",null,(s,e)=>Open());
+        menu.Items.Add("打开监控界面（默认浏览器）",null,(s,e)=>Open());
+        menu.Items.Add("打开 App 窗口",null,(s,e)=>OpenApp());
         menu.Items.Add("状态",null,(s,e)=>Status());
         menu.Items.Add("退出监控器",null,(s,e)=>Quit());icon.ContextMenuStrip=menu;
         menu.Opening+=(s,e)=>Log("Tray menu opened");
@@ -69,6 +72,20 @@ class MonitorTray : ApplicationContext {
     }
     void Log(string s){if(s!=null)try{lock(this)File.AppendAllText(Path.Combine(root,"data","tray.log"),s+Environment.NewLine);}catch{}}
     void Open(){try{Process.Start(new ProcessStartInfo(url){UseShellExecute=true});}catch(Exception e){MessageBox.Show(e.Message,"OpenCode Monitor");}}
+    void OpenApp(){
+        try{
+            string browser=null;
+            var prog=Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice","ProgId",null) as string;
+            if(prog!=null)using(var key=Registry.ClassesRoot.OpenSubKey(prog+@"\shell\open\command")){
+                var command=key==null?null:key.GetValue(null) as string;
+                var match=Regex.Match(command??"","^\"([^\"]+)\"");
+                if(match.Success){var exe=match.Groups[1].Value;var leaf=Path.GetFileName(exe);if(leaf.Equals("chrome.exe",StringComparison.OrdinalIgnoreCase)||leaf.Equals("msedge.exe",StringComparison.OrdinalIgnoreCase))browser=exe;}
+            }
+            if(browser==null){foreach(var folder in new[]{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}){var exe=Path.Combine(folder,"Microsoft","Edge","Application","msedge.exe");if(File.Exists(exe)){browser=exe;break;}}}
+            if(browser==null){Open();return;}
+            var info=new ProcessStartInfo(browser,"--app=\""+url+"\" --user-data-dir=\""+Path.Combine(root,"data","app-profile")+"\" --no-first-run --no-default-browser-check");info.UseShellExecute=false;Process.Start(info);
+        }catch(Exception e){MessageBox.Show(e.Message,"OpenCode Monitor");}
+    }
     void Status(){try{MessageBox.Show(Read("/api/health"),"OpenCode Monitor 状态");}catch(Exception e){MessageBox.Show(e.Message,"OpenCode Monitor 状态");}}
     void Quit(){
         if(closing)return;closing=true;

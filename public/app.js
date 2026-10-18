@@ -53,23 +53,25 @@ async function refresh(){
   if(loading)return;
   loading=true;
   try{
-    const response=await fetch('/api/dashboard',{cache:'no-store'});
+    const response=await fetch('/api/measurement',{cache:'no-store'});
     if(!response.ok)throw new Error('HTTP '+response.status);
     const d=await response.json();
-    const history=d.rows.filter(r=>!r.seed&&!r.tps_outlier&&Number.isFinite(r.included_tps));
+    const measurement=d.measurement;
+    const history=measurement.chart;
     const latest=history.at(-1);
     const recent=history.slice(-20);
-    const average=recent.length?recent.reduce((sum,r)=>sum+r.included_tps,0)/recent.length:null;
+    const average=measurement.average20_tps;
     const chartRows=history.slice(-120);
-    $('model-name').textContent=d.selectedModel||'';
-    $('updated').textContent='更新于 '+time(d.updated)+' · 每 8 秒自动刷新';
+    $('model-name').textContent='当前测速模型：'+(measurement.model||'等待新调用');
+    $('measurement-start').textContent=(measurement.model?'本轮始于 '+time(measurement.started_at):'从 '+time(measurement.epoch)+' 开始等待新调用')+' · 切换模型后重新计数，历史保留';
+    $('updated').textContent=(d.updated?'更新于 '+time(d.updated):'正在采集')+' · 每 8 秒自动刷新';
     $('live-speed').textContent=latest?fmt(latest.included_tps):'—';
     $('live-time').textContent=latest?'有效值时间 '+time(latest.timestamp):'暂无有效值';
     $('live-time').classList.remove('stale');
     $('average-speed').textContent=fmt(average);
-    $('average-count').textContent='基于 '+recent.length+' 条；已排除异常高值';
+    $('average-count').textContent='本轮 '+measurement.average20_samples+' 条；已排除异常高值';
     const inputTokens=Number(d.summary?.input_tokens??0),outputTokens=Number(d.summary?.output_tokens??0);
-    const tokenUsage=d.token_usage||{};
+    const tokenUsage=measurement.token_usage;
     $('token-total').textContent=tokenFmt(tokenUsage.total_tokens??(inputTokens+outputTokens));
     $('token-breakdown').textContent='输入 '+tokenFmt(tokenUsage.input_tokens??inputTokens)+' · 输出 '+tokenFmt(tokenUsage.output_tokens??outputTokens);
     const sourceRows=tokenUsage.sources||[],sourceToggle=$('source-usage-toggle'),sourceList=$('source-usage-list');
@@ -94,6 +96,11 @@ async function refresh(){
     bucketHistory.hidden=!historyExpanded;
     bucketHistory.innerHTML=olderBuckets.map(item=>'<span class="bucket-chip">第 '+item.index+' 段 · '+(item.average_tps==null?'—':fmt(item.average_tps)+' tok/s')+'</span>').join('');
     $('chart-range').textContent='最近 '+chartRows.length+' 条有效测速';
+    $('measurement-records').innerHTML=recordRows(measurement.records,true);
+    $('record-count').textContent='本轮 '+measurement.requests+' 次调用 · '+measurement.valid_samples+' 次有效测速 · 显示最近 20 条';
+    const previous=$('history-model').value;
+    $('history-model').innerHTML=d.history_models.map(x=>'<option value="'+esc(x.model)+'">'+esc(x.model)+'（'+x.records+' 条）</option>').join('');
+    if(d.history_models.some(x=>x.model===previous))$('history-model').value=previous;
     $('error').textContent=(d.warnings||[]).join('；');
     renderChart(chartRows);
   }catch(error){
@@ -102,3 +109,30 @@ async function refresh(){
 }
 refresh();
 setInterval(refresh,8000);
+function recordRows(rows,details=false){
+  if(!rows.length)return '<tr><td colspan="9" class="caption">暂无记录。请在 OpenCode 发起一次新的模型调用。</td></tr>';
+  return rows.map(r=>{
+    const status=r.tps_outlier?'异常高值（保留记录）':r.http_status?'错误 '+r.http_status:r.complete===false?'进行中':r.decode_tps==null?'缺少可靠计时':/partial/.test(r.quality??'')?'部分计时估值':'有效测速';
+    return '<tr><td>'+esc(time(r.timestamp))+'</td><td>'+esc(r.model)+'</td><td>'+fmt(r.decode_tps)+'</td><td>'+tokenFmt(r.total_output_tokens)+'</td><td>'+esc(status)+'</td>'+(details?'<td class="detail-col">'+tokenFmt(r.input_tokens)+'</td><td class="detail-col">'+fmt(r.decode_duration)+'</td><td class="detail-col">'+fmt(r.ttft)+'</td><td class="detail-col source-path">'+esc(r.source)+'</td>':'')+'</tr>';
+  }).join('');
+}
+$('record-details').addEventListener('change',()=>{$('record-panel').classList.toggle('show-details',$('record-details').checked);});
+$('reset-measurement').addEventListener('click',async()=>{
+  const button=$('reset-measurement');button.disabled=true;
+  try{const r=await fetch('/api/measurement/reset',{method:'POST',headers:{'X-Monitor-Action':'reset'}});if(!r.ok)throw Error('HTTP '+r.status);await refresh();}catch(e){$('error').textContent=e.message;}finally{button.disabled=false;}
+});
+async function loadHistory(){
+  if(!$('history-details').open||!$('history-model').value)return;
+  try{const r=await fetch('/api/dashboard?model='+encodeURIComponent($('history-model').value));if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();const rows=d.rows.filter(x=>!x.seed);$('history-count').textContent='该模型历史 '+rows.length+' 条 · 显示最近 50 条 · 不计入本轮';$('history-records').innerHTML=recordRows(rows.slice(-50).reverse());}catch(e){$('history-count').textContent='历史读取失败：'+e.message;}
+}
+$('history-details').addEventListener('toggle',loadHistory);$('history-model').addEventListener('change',loadHistory);
+async function checkUpdate(force=false){
+  $('check-update').disabled=true;
+  try{const r=await fetch('/api/update'+(force?'?force=1':''));if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();$('app-version').textContent='版本 '+d.current;$('update-status').textContent=d.error?'检查失败：'+d.error:d.available?'发现新版本 '+d.latest:'已是最新版本';$('install-update').hidden=!d.available;}catch(e){$('update-status').textContent='检查失败：'+e.message;}finally{$('check-update').disabled=false;}
+}
+$('check-update').addEventListener('click',()=>checkUpdate(true));
+$('install-update').addEventListener('click',async()=>{
+  $('install-update').disabled=true;$('update-status').textContent='正在下载并校验更新，请稍候…';
+  try{const r=await fetch('/api/update/install',{method:'POST',headers:{'X-Monitor-Action':'update'}});const d=await r.json();if(!r.ok)throw Error(d.error||'HTTP '+r.status);$('update-status').textContent='正在更新并重启后台，窗口可保持打开…';let recovered=false;for(let i=0;i<90;i++){await new Promise(r=>setTimeout(r,1000));try{const h=await(await fetch('/api/health')).json();if(h.version===d.version){recovered=true;location.reload();break;}}catch{}}if(!recovered)throw Error('更新未完成，请查看托盘状态或 data/update-status.json');}catch(e){$('update-status').textContent=e.message;$('install-update').disabled=false;}
+});
+checkUpdate();

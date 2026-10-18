@@ -1,5 +1,6 @@
 import { importSeed } from './legacy.mjs';
 import {remoteLogs} from './remote-logs.mjs';
+import {measurement} from './measurement.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -38,6 +39,23 @@ export class Store {
       }
       this.db.prepare("DELETE FROM state WHERE id LIKE 'db:%' OR id LIKE 'dbv2:%'").run();this.saveState('extractor',{version:EXTRACTOR_VERSION});}
     importSeed(this,path.join(root,'seed'));
+    if(!this.state('measurement-ui-v1').started_at)this.resetMeasurement();
+  }
+  resetMeasurement(){
+    const state={started_at:new Date().toISOString(),after_rowid:this.db.prepare('SELECT coalesce(max(rowid),0) n FROM records').get().n};
+    this.saveState('measurement-ui-v1',state);
+    this.raw('measurement-ui','measurement_reset','monitor',state,'user_or_install_action');
+    return state;
+  }
+  measurement(){
+    const rows=this.db.prepare('SELECT rowid _rowid,data FROM records ORDER BY ts,id').all().map(x=>({...parse(x.data),_rowid:x._rowid}));
+    const history=new Map();
+    for(const r of rows.filter(r=>!r.seed)){
+      const item=history.get(r.model)??{model:r.model,records:0,total_tokens:0};
+      item.records++;item.total_tokens+=(r.input_tokens??0)+(r.total_output_tokens??0);history.set(r.model,item);
+    }
+    const state=this.state('measurement-ui-v1');
+    return {measurement:measurement(rows,state.started_at,this.config.tokenSpeedBucketSize,state.after_rowid),history_models:[...history.values()].sort((a,b)=>a.model.localeCompare(b.model)),updated:this.lastScan,warnings:this.warnings};
   }
   state(id) {return parse(this.db.prepare('SELECT data FROM state WHERE id=?').get(id)?.data)??{};}
   saveState(id,obj) {this.db.prepare('INSERT OR REPLACE INTO state VALUES(?,?)').run(id,JSON.stringify(obj));}

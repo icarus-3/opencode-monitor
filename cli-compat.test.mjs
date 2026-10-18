@@ -29,5 +29,9 @@ test('installed OpenCode V1 and desktop V2 load the same plugin without wrapper 
  const health=await(await fetch('http://127.0.0.1:18765/api/health')).json();assert.equal(health.app,'opencode-monitor');
  const t=fs.readFileSync(path.join(bundle,'data','control.token'),'utf8');await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+t}});await pause(1800);
  }finally{kill(v2);}
- }finally{kill(v1);}
+ }finally{
+   try{const health=await(await fetch('http://127.0.0.1:18765/api/health')).json();if(path.resolve(health.root)===path.resolve(bundle)){const t=fs.readFileSync(path.join(bundle,'data','control.token'),'utf8');await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+t}});}}catch{}
+   for(let i=0;i<80&&fs.existsSync(path.join(bundle,'data','tray.pid'));i++)await pause(100);
+   kill(v1);
+ }
 });

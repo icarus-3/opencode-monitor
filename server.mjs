@@ -9,11 +9,13 @@ import { Store } from './store.mjs';
 import { discover } from './discover.mjs';
 import {cancelRemoteTransfers} from './remote.mjs';
 import {cancelRemoteLogs} from './remote-logs.mjs';
+import {Updater,launchUpdate} from './updater.mjs';
 
 const root=process.env.MONITOR_ROOT??path.dirname(fileURLToPath(import.meta.url));
 const configPath=path.join(root,fs.existsSync(path.join(root,'config.json'))?'config.json':'config.example.json');
 const config=discover(JSON.parse(fs.readFileSync(configPath,'utf8').replace(/^\uFEFF/,'')));
 const store=new Store(root,config);
+const updater=new Updater(root);
 store.scan();
 const interval=setInterval(()=>store.scan(),Math.max(5,config.pollSeconds)*1000);
 let eventChild=null;
@@ -169,6 +171,17 @@ const server=http.createServer((req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
   if(req.headers.origin&&!['http://127.0.0.1:'+config.port,'http://localhost:'+config.port].includes(req.headers.origin)){res.writeHead(403);res.end();return;}
+  if(req.method==='GET'&&url.pathname==='/api/update'){
+    updater.check(url.searchParams.get('force')==='1').then(info=>{const {release,...publicInfo}=info;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(publicInfo));}).catch(e=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({current:updater.current,available:false,error:e.message}));});return;
+  }
+  if(req.method==='POST'&&url.pathname==='/api/update/install'){
+    if(!['http://127.0.0.1:'+config.port,'http://localhost:'+config.port].includes(req.headers.origin)||req.headers['x-monitor-action']!=='update'){res.writeHead(403);res.end();return;}
+    (async()=>{try{const prepared=await updater.prepare();const result=await launchUpdate(root,prepared,config.port);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({accepted:true,version:result.version}));setTimeout(stop,500);}catch(e){updater.applying=false;res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}})();return;
+  }
+  if(req.method==='POST'&&url.pathname==='/api/measurement/reset'){
+    if(!['http://127.0.0.1:'+config.port,'http://localhost:'+config.port].includes(req.headers.origin)||req.headers['x-monitor-action']!=='reset'){res.writeHead(403);res.end();return;}
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify(store.resetMeasurement()));return;
+  }
   if(req.method==='POST'&&['/api/events','/api/plugin-connected'].includes(url.pathname)){
     if(req.headers.authorization!=='Bearer '+controlToken){res.writeHead(403);res.end();return;}
     let body='',size=0;req.on('data',chunk=>{size+=chunk.length;if(size>16384){req.destroy();return;}body+=chunk;});
@@ -179,8 +192,11 @@ const server=http.createServer((req,res)=>{
     res.end('{}');setImmediate(stop);return;
   }
   if(req.method!=='GET'){res.writeHead(405);res.end();return;}
+  if(url.pathname==='/api/measurement'){
+    res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(store.measurement()));return;
+  }
   if(url.pathname==='/api/health'){
-    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({app:'opencode-monitor',version:'1.3.0-rc.1',root,pid:process.pid,last_scan:store.lastScan,warnings:store.warnings}));return;
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({app:'opencode-monitor',version:updater.current,root,pid:process.pid,last_scan:store.lastScan,warnings:store.warnings}));return;
   }
   if(['/api/history','/api/telemetry','/api/versions','/api/diagnostics'].includes(url.pathname)){
     try{

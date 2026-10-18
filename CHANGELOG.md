@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0-rc.2 — 2026-10-18
+
+- Fresh measurement epochs exclude auto-discovered/imported history from the homepage without deleting history. Exact model switches start a new run, including switches back to a previously used model.
+- Current-model speed, 20-sample mean, curve, tokens, interval progress and measurement records share the same run. Missing timing never falls back to the previous model. Manual reset preserves the archive.
+- Add compact current records, expandable performance details and model-filtered historical details. Fix long token totals overflowing cards.
+- Keep the system default browser (including Chrome) for normal opening. Add an optional Chrome/Edge App window entry to the tray without changing browser defaults.
+- Add GitHub update detection, visible update prompts and one-click apply/restart, plus an offline local update package. Verify GitHub asset SHA256 and per-file manifest; reject archive traversal and personal config/data entries. Back up SQLite and replaced files; attempt program rollback on failure.
+
 ## 1.3.0-rc.1 — 2026-10-18
 
 - Restore legacy benchmark import, frozen baselines and explicit history migration. Back up SQLite consistently before upgrades/imports; archive previous derived records and preserve legacy-only fields and frozen seed metrics.

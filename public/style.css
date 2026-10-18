@@ -13,6 +13,13 @@ main{display:flex;flex-direction:column;gap:18px}
 .label{color:#526176;font-size:14px}
 .value{display:flex;align-items:baseline;gap:10px;margin:12px 0 7px}
 .value strong{font-size:38px;font-weight:650;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.value strong{font-size:clamp(20px,2.5vw,36px);overflow-wrap:anywhere;min-width:0}
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.toolbar button{border:1px solid #d5deea;background:white;border-radius:7px;padding:7px 12px;color:#344054;cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}
+.toolbar button[hidden]{display:none}
+.table-scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px;margin-top:12px}th,td{padding:10px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}th{color:#66758a}.source-path{max-width:280px;white-space:normal;overflow-wrap:anywhere}
+.detail-col{display:none}.show-details .detail-col{display:table-cell}summary{cursor:pointer;font-weight:600;margin-bottom:12px}select{max-width:100%;margin:8px;padding:5px}
 .value span{font-size:14px;color:#68778c}
 .history-toggle{margin-top:8px;padding:0;border:0;background:none;color:#3478d4;font:inherit;font-size:12px;cursor:pointer}
 .history-toggle:hover{text-decoration:underline}

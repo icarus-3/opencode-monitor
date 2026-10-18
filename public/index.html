@@ -11,15 +11,17 @@
   <header class="topbar">
     <div>
       <h1>OpenCode Monitor</h1>
-      <div id="model-name" class="model">读取模型中…</div>
+      <div id="model-name" class="model">当前测速模型：等待新调用</div>
+      <div id="measurement-start" class="caption">历史记录保留，新一轮从零开始</div>
     </div>
     <div id="updated" class="updated" aria-live="polite">正在读取…</div>
   </header>
   <main>
+    <div class="toolbar"><button id="reset-measurement" type="button">重新测速</button><span id="app-version" class="caption"></span><button id="check-update" type="button">检查更新</button><button id="install-update" type="button" hidden>一键更新</button><span id="update-status" role="status" class="caption"></span></div>
     <div id="error" role="alert"></div>
     <section class="cards" aria-label="速度统计">
       <article class="card">
-        <div class="label">实时速度</div>
+        <div class="label">本轮最近有效速度</div>
         <div class="value"><strong id="live-speed">—</strong><span>tok/s</span></div>
         <div id="live-time" class="caption">等待有效记录</div>
       </article>
@@ -29,10 +31,10 @@
         <div id="average-count" class="caption">等待有效记录</div>
       </article>
       <article class="card">
-        <div class="label">累计 Token 用量</div>
+        <div class="label">本轮 Token 用量</div>
         <div class="value"><strong id="token-total">—</strong><span>tokens</span></div>
         <div id="token-breakdown" class="caption">输入 — · 输出 —</div>
-        <div class="caption">所有模型与已配置数据源 · 输出含推理</div>
+        <div class="caption">仅当前模型、本轮测速 · 输出含推理</div>
         <button id="source-usage-toggle" class="history-toggle" type="button" aria-expanded="false" aria-controls="source-usage-list" hidden>展开来源用量</button>
         <div id="source-usage-list" class="source-usage-list" aria-label="按数据源统计 Token 用量" hidden></div>
       </article>
@@ -52,6 +54,14 @@
       </div>
       <div id="speed-chart"></div>
     </article>
+    <article class="panel" id="record-panel">
+      <div class="chart-heading"><div><h2>本轮测速记录</h2><div id="record-count" class="caption">等待新调用</div></div><label class="caption"><input id="record-details" type="checkbox"> 显示详情</label></div>
+      <div class="table-scroll"><table><thead><tr><th>时间</th><th>模型</th><th>速度 tok/s</th><th>输出 tokens</th><th>状态</th><th class="detail-col">输入 tokens</th><th class="detail-col">耗时 s</th><th class="detail-col">TTFT s</th><th class="detail-col">来源</th></tr></thead><tbody id="measurement-records"></tbody></table></div>
+    </article>
+    <details class="panel" id="history-details"><summary>历史详情（保留数据，不计入本轮测速）</summary>
+      <label class="caption">历史模型 <select id="history-model"></select></label><div id="history-count" class="caption"></div>
+      <div class="table-scroll"><table><thead><tr><th>时间</th><th>模型</th><th>速度 tok/s</th><th>输出 tokens</th><th>状态</th></tr></thead><tbody id="history-records"></tbody></table></div>
+    </details>
   </main>
 </body>
 </html>
