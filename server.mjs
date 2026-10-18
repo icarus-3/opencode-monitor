@@ -1,15 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.mjs';
 import { discover } from './discover.mjs';
+import {cancelRemoteTransfers} from './remote.mjs';
+import {cancelRemoteLogs} from './remote-logs.mjs';
 
-const root=path.dirname(fileURLToPath(import.meta.url));
+const root=process.env.MONITOR_ROOT??path.dirname(fileURLToPath(import.meta.url));
 const configPath=path.join(root,fs.existsSync(path.join(root,'config.json'))?'config.json':'config.example.json');
-const config=discover(JSON.parse(fs.readFileSync(configPath,'utf8')));
+const config=discover(JSON.parse(fs.readFileSync(configPath,'utf8').replace(/^\uFEFF/,'')));
 const store=new Store(root,config);
 store.scan();
 const interval=setInterval(()=>store.scan(),Math.max(5,config.pollSeconds)*1000);
@@ -18,6 +21,7 @@ let eventRetry=null;
 let stopping=false;
 const remoteEventChildren=new Map();
 const remoteEventRetries=new Map();
+const controlToken=crypto.randomBytes(32).toString('hex');
 
 function scheduleEventReconnect(){
   if(stopping||eventRetry)return;
@@ -32,7 +36,7 @@ function acceptEvent(raw,sourceId=null){
 }
 function connectOpenCodeEvents(){
   if(stopping||eventChild)return;
-  const cli=path.join(process.env.LOCALAPPDATA??'','Programs','@opencodedesktop','resources','opencode-cli.exe');
+  const cli=config.eventCli??path.join(process.env.LOCALAPPDATA??'','Programs','@opencodedesktop','resources','opencode-cli.exe');
   if(!fs.existsSync(cli)){store.setEventStreamStatus('offline');scheduleEventReconnect();return;}
   store.setEventStreamStatus('connecting');
   const child=spawn(cli,['api','GET','/api/event'],{windowsHide:true,stdio:['ignore','pipe','ignore']});
@@ -164,7 +168,26 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
+  if(req.headers.origin&&!['http://127.0.0.1:'+config.port,'http://localhost:'+config.port].includes(req.headers.origin)){res.writeHead(403);res.end();return;}
+  if(req.method==='POST'&&['/api/events','/api/plugin-connected'].includes(url.pathname)){
+    if(req.headers.authorization!=='Bearer '+controlToken){res.writeHead(403);res.end();return;}
+    let body='',size=0;req.on('data',chunk=>{size+=chunk.length;if(size>16384){req.destroy();return;}body+=chunk;});
+    req.on('end',()=>{try{if(url.pathname==='/api/events')store.captureEvent(JSON.parse(body));store.setEventStreamStatus('connected');res.end('{}');}catch{res.writeHead(400);res.end();}});return;
+  }
+  if(req.method==='POST'&&url.pathname==='/api/shutdown'){
+    if(req.headers.authorization!=='Bearer '+controlToken){res.writeHead(403);res.end();return;}
+    res.end('{}');setImmediate(stop);return;
+  }
   if(req.method!=='GET'){res.writeHead(405);res.end();return;}
+  if(url.pathname==='/api/health'){
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({app:'opencode-monitor',version:'1.3.0-rc.1',root,pid:process.pid,last_scan:store.lastScan,warnings:store.warnings}));return;
+  }
+  if(['/api/history','/api/telemetry','/api/versions','/api/diagnostics'].includes(url.pathname)){
+    try{
+      res.setHeader('Content-Type','application/json; charset=utf-8');
+      res.end(JSON.stringify(store.exportData(url.pathname.slice(5),Object.fromEntries(url.searchParams))));
+    }catch(e){res.writeHead(400);res.end(JSON.stringify({error:e.message}));}return;
+  }
   if(url.pathname==='/api/dashboard'){
     try{res.setHeader('Content-Type','application/json; charset=utf-8');res.end(JSON.stringify(store.dashboard(Object.fromEntries(url.searchParams))));}
     catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}
@@ -186,15 +209,18 @@ server.on('error',e=>{
   process.exitCode=1;
 });
 server.listen(config.port,'127.0.0.1',()=>{
+  fs.writeFileSync(path.join(root,'data','control.token'),controlToken,{mode:0o600});
   fs.writeFileSync(path.join(root,'data','server.pid'),String(process.pid));
-  connectOpenCodeEvents();
+  if(config.eventCli)connectOpenCodeEvents();else store.setEventStreamStatus('offline');
   for(const source of config.sshDatabases??[])connectRemoteOpenCodeEvents(source);
   console.log('OpenCode Monitor http://127.0.0.1:'+config.port+' — read-only sources; Ctrl+C to stop');
 });
 function stop(){
   clearInterval(interval);
   stopEventStream();
-  server.close(()=>{
+  cancelRemoteTransfers();cancelRemoteLogs();
+  server.close(async()=>{
+    if(store.scanPromise)await store.scanPromise;
     store.db.close();
     const pid=path.join(root,'data','server.pid');
     if(fs.existsSync(pid)&&fs.readFileSync(pid,'utf8')===String(process.pid))fs.unlinkSync(pid);

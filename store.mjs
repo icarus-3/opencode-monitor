@@ -1,6 +1,9 @@
+import { importSeed } from './legacy.mjs';
+import {remoteLogs} from './remote-logs.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { EXTRACTOR_VERSION, projectMessage, projectPart } from './telemetry.mjs';
 import { syncRemoteDatabase } from './remote.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { extract, median, analyze, bucket, tokenUsageBuckets } from './metrics.mjs';
@@ -17,19 +20,47 @@ export class Store {
     }
     fs.mkdirSync(path.join(root,'data'),{recursive:true});
     this.db=new DatabaseSync(path.join(root,'data','monitor.sqlite'));
+    const version=this.db.prepare('PRAGMA user_version').get().user_version;
+    if(version<2 && this.db.prepare("SELECT name FROM sqlite_master WHERE name='records'").get()){
+      const backup=path.join(root,'data','backup-before-v2-'+Date.now()+'.sqlite');
+      this.db.exec("VACUUM INTO '"+backup.replaceAll("'","''")+"'");
+    }
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,ts TEXT NOT NULL,model TEXT NOT NULL,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS record_time ON records(ts); CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,ts TEXT,model TEXT,data TEXT);
       CREATE TABLE IF NOT EXISTS state(id TEXT PRIMARY KEY,data TEXT); CREATE TABLE IF NOT EXISTS baselines(model TEXT,bucket TEXT,data TEXT,PRIMARY KEY(model,bucket));
       CREATE TABLE IF NOT EXISTS streams(id TEXT PRIMARY KEY,ts INTEGER,model TEXT); CREATE TABLE IF NOT EXISTS live_parts(session_id TEXT NOT NULL,message_id TEXT NOT NULL,part_type TEXT NOT NULL,ordinal INTEGER NOT NULL,start_ms INTEGER,end_ms INTEGER,PRIMARY KEY(session_id,message_id,part_type,ordinal));`);
-    if(this.state('extractor').version!==4) {this.db.prepare("DELETE FROM state WHERE id LIKE 'db:%' OR id LIKE 'dbv2:%'").run();this.saveState('extractor',{version:4});}
+    this.db.exec(`CREATE TABLE IF NOT EXISTS telemetry_v1(id TEXT PRIMARY KEY,record_id TEXT,kind TEXT,source TEXT,observed_at TEXT,extractor INTEGER,confidence TEXT,data TEXT);
+      CREATE INDEX IF NOT EXISTS telemetry_record ON telemetry_v1(record_id);
+      CREATE TABLE IF NOT EXISTS record_versions_v1(hash TEXT PRIMARY KEY,record_id TEXT,observed_at TEXT,extractor INTEGER,data TEXT); PRAGMA user_version=2;`);
+    if(this.state('extractor').version!==EXTRACTOR_VERSION) {
+      for(const row of this.db.prepare('SELECT id,data FROM records').all()){
+        const r=parse(row.data);if(r){this.archive(row.id,r);this.raw(row.id,'legacy_derived',r.source??'legacy',r,'original_inputs_unavailable');}
+      }
+      this.db.prepare("DELETE FROM state WHERE id LIKE 'db:%' OR id LIKE 'dbv2:%'").run();this.saveState('extractor',{version:EXTRACTOR_VERSION});}
+    importSeed(this,path.join(root,'seed'));
   }
   state(id) {return parse(this.db.prepare('SELECT data FROM state WHERE id=?').get(id)?.data)??{};}
   saveState(id,obj) {this.db.prepare('INSERT OR REPLACE INTO state VALUES(?,?)').run(id,JSON.stringify(obj));}
   recordId(file,key) {const source=this.remoteSources.get(file);return source?'ssh:'+source.id+':'+key:key;}
   liveSessionId(file,session) {const source=this.remoteSources.get(file);return source?'ssh:'+source.id+':'+session:session;}
   setRemoteEventStatus(id,status) {const old=this.remoteStatus.get(id)??{};this.remoteStatus.set(id,{...old,eventStream:status});}
-  record(id,r) { this.db.prepare('INSERT OR REPLACE INTO records VALUES(?,?,?,?)').run(id,r.timestamp,r.model,JSON.stringify({...r,id})); }
-  event(id,e) {this.db.prepare('INSERT OR REPLACE INTO events VALUES(?,?,?,?)').run(id,e.timestamp,e.model??'unknown',JSON.stringify({...e,id}));}
+  archive(id,r) {
+    const data=JSON.stringify(r);this.db.prepare('INSERT OR IGNORE INTO record_versions_v1 VALUES(?,?,?,?,?)').run(hash(id+data),id,new Date().toISOString(),r.extractor_version??0,data);
+  }
+  raw(recordId,kind,source,data,confidence='source_reported') {
+    const json=JSON.stringify(data),id=hash(recordId+kind+source+json);
+    this.db.prepare('INSERT OR IGNORE INTO telemetry_v1 VALUES(?,?,?,?,?,?,?,?)').run(id,recordId,kind,source,new Date().toISOString(),EXTRACTOR_VERSION,confidence,json);
+  }
+  record(id,r) {
+    const old=parse(this.db.prepare('SELECT data FROM records WHERE id=?').get(id)?.data);
+    if(old)this.archive(id,old);
+    // Keep legacy-only fields, and preserve frozen seed metrics on collision.
+    const merged=old?.seed&&!r.seed?{...r,...old}:{...old,...r};
+    const next={...merged,id,extractor_version:EXTRACTOR_VERSION};
+    this.archive(id,next);
+    this.db.prepare('INSERT INTO records VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET ts=excluded.ts,model=excluded.model,data=excluded.data').run(id,next.timestamp,next.model,JSON.stringify(next));
+  }
+  event(id,e) {this.raw(e.session_id+':'+e.message_id,'event',e.source??'unknown',e);this.db.prepare('INSERT OR REPLACE INTO events VALUES(?,?,?,?)').run(id,e.timestamp,e.model??'unknown',JSON.stringify({...e,id}));}
   setEventStreamStatus(status) { this.eventStreamStatus=status; }
   captureEvent(event,sourceId=null) {
     if(!event||typeof event!=='object')return;
@@ -48,7 +79,9 @@ export class Store {
     const ordinal=Number(data.ordinal);
     let created=Number(event.created);
     if(!Number.isFinite(created)&&typeof event.created==='string')created=Date.parse(event.created);
-    if(!session||!message||!Number.isSafeInteger(ordinal)||ordinal<0||!Number.isFinite(created))return;
+    if(typeof sourceSession!=='string'||typeof message!=='string'||!sourceSession||!message||sourceSession.length>500||message.length>500||!Number.isSafeInteger(ordinal)||ordinal<0||!Number.isFinite(created)||Math.abs(created)>8.64e15)return;
+    this.raw(session+':'+message,'timing_event',sourceId?'ssh:'+sourceId:'local',{type,session_id:session,message_id:message,ordinal,created},'event_observed');
+    this.dirtyStreams.add(message);
     if(spec[1]==='start'){
       this.db.prepare('INSERT INTO live_parts(session_id,message_id,part_type,ordinal,start_ms,end_ms) VALUES(?,?,?,?,?,NULL) ON CONFLICT(session_id,message_id,part_type,ordinal) DO UPDATE SET start_ms=COALESCE(live_parts.start_ms,excluded.start_ms)').run(session,message,spec[0],ordinal,created);
     }else{
@@ -67,7 +100,7 @@ export class Store {
         const pending=st.pending??{};
         // Bound each batch; leave incomplete final line for the next poll.
         const data=Buffer.alloc(Math.min(stat.size-offset,8*1024*1024));fs.readSync(fd,data,0,data.length,offset);
-        const end=data.lastIndexOf(10);if(end<0) return;
+        const end=data.lastIndexOf(10);if(end<0) continue;
         const lines=data.subarray(0,end+1).toString('utf8').split(/\r?\n/);
         this.db.exec('BEGIN');
         try {for(const line of lines) {
@@ -79,7 +112,7 @@ export class Store {
           const provider=line.match(/\bproviderID=(\S+)/)?.[1], model=line.match(/\bmodelID=(\S+)/)?.[1];
           if(/\bmessage=stream\b/.test(line)&&session&&provider&&model) {
             const context=pending[key];const modelName=provider+'/'+model;
-            if(context) {context.model=modelName;this.db.prepare('INSERT OR IGNORE INTO streams VALUES(?,?,?)').run(session+':'+context.msg,Date.parse(ts),modelName);this.dirtyStreams.add(context.msg);}
+            if(context) {context.model=modelName;this.db.prepare('INSERT OR IGNORE INTO streams VALUES(?,?,?)').run(session+':'+context.msg,Date.parse(ts),modelName);this.dirtyStreams.add(context.msg);this.raw(session+':'+context.msg,'stream',file,{timestamp:Date.parse(ts),model:modelName});}
           }
           if(/\blevel=ERROR\b/.test(line)) {
             // Inspect error fields only: digits elsewhere (timestamps, IDs, tokens) are never HTTP codes.
@@ -123,6 +156,7 @@ export class Store {
         const ps=parts.all(id).map(p=>({type:p.type,time:parse(p.time)})), key=row.session_id+':'+id,recordId=this.recordId(file,key);
         const stream=this.db.prepare('SELECT * FROM streams WHERE id=?').get(key), r=extract(m,ps,stream?.model===m.providerID+'/'+m.modelID?stream.ts:null);
         r.source=file;r.session_id=row.session_id;r.message_id=id;r.seed=false;r.http_status=Number(m.error?.data?.statusCode)||null;
+        this.raw(recordId,'message_v1',file,{message:projectMessage(m),parts:ps.map(projectPart),stream:stream?.ts??null});
         this.record(recordId,r);
         if(m.error) {
           this.event('message:'+recordId,{timestamp:r.timestamp,model:r.model,kind:'error',http_status:r.http_status,error_type:m.error.name??'SessionError',message:(m.error.name??'SessionError')+(r.http_status?' / HTTP '+r.http_status:''),source:file,session_id:row.session_id,message_id:id});
@@ -172,12 +206,12 @@ export class Store {
         const output=(Number.isFinite(row.tokens_output)?row.tokens_output:0)+(Number.isFinite(row.tokens_reasoning)?row.tokens_reasoning:0);
         const complete=Number.isFinite(row.message_completed),steps=row.finish?1:0,toolCalls=contentParts.filter(p=>p.type==='tool').length,hasError=!!row.error_name||row.finish==='error';
         const valid=steps===1&&output>0&&complete&&outputParts.length>0&&timed.length>0&&first!=null&&last>first&&!hasError;
-        const stream=this.db.prepare('SELECT * FROM streams WHERE id=?').get(key),created=Number.isFinite(row.message_created)?row.message_created:row.time_created;
+        const stream=this.db.prepare('SELECT * FROM streams WHERE id=?').get(this.liveSessionId(file,row.session_id)+':'+row.id),created=Number.isFinite(row.message_created)?row.message_created:row.time_created;
         const start=Number.isFinite(stream?.ts)&&stream.ts<=first&&stream.ts>=created-1000?stream.ts:null;
         const duration=valid?(last-first)/1000:null,total=start!=null&&last>start?(last-start)/1000:null;
         const quality=valid?(timed.length===outputParts.length?(usedLiveTiming?'v2_live_event_part_timing':'v2_projected_part_timing'):'v2_partial_part_timing_estimate'):'incomplete_or_missing_timestamps';
         const r={timestamp:new Date(start??created).toISOString(),model,input_tokens:input,cache_read_tokens:cacheRead,cache_write_tokens:cacheWrite,output_tokens:Number.isFinite(row.tokens_output)?row.tokens_output:null,reasoning_tokens:Number.isFinite(row.tokens_reasoning)?row.tokens_reasoning:null,total_output_tokens:output,context_bucket:bucket(input),ttft:valid&&start!=null?(first-start)/1000:null,decode_duration:duration,decode_tps:duration?output/duration:null,total_duration:total,e2e_tps:total&&valid?output/total:null,e2e_scope:start!=null?'stream_to_last_part':'unavailable_without_stream',cost:Number.isFinite(row.cost)?row.cost:null,compaction:row.agent==='compaction',tool_calls:toolCalls,steps,complete,timed_parts:timed.length,output_parts:outputParts.length,quality,timing:start!=null?'log_stream':'no_stream_TTFT_unavailable'};
-        r.source=file;r.session_id=row.session_id;r.message_id=row.id;r.seed=false;r.http_status=Number(row.http_status)||null;this.record(recordId,r);
+        r.source=file;r.session_id=row.session_id;r.message_id=row.id;r.seed=false;r.http_status=Number(row.http_status)||null;this.raw(recordId,'message_v2',file,{...row,content:contentParts,live:outputParts.map((p,i)=>({type:p.type,ordinal:i})),stream:stream?.ts??null});this.record(recordId,r);
         if(hasError)this.event('v2:message:'+recordId,{timestamp:r.timestamp,model,kind:'error',http_status:r.http_status,error_type:row.error_name??'AssistantError',message:(row.error_name??'AssistantError')+(r.http_status?' / HTTP '+r.http_status:''),source:file,session_id:row.session_id,message_id:row.id});
       }
       for(const row of compactions) {const model=row.provider_id&&row.model_id?row.provider_id+'/'+row.model_id:'unknown';this.event('v2:compaction:'+this.recordId(file,row.id),{timestamp:new Date(row.time_created).toISOString(),model,kind:'compaction',message:'OpenCode V2 compaction',source:file,session_id:row.session_id});}
@@ -198,9 +232,16 @@ export class Store {
     const synchronized=await Promise.all(remoteSources.map(async source=>{
       const id=sourceId(source.id??source.host);
       const snapshot=path.join(this.root,'data','remote-sources',id+'.sqlite');
-      fs.rmSync(snapshot,{force:true});
+      // Retain only the privacy-projected snapshot for late-event recomputation.
+
       const previous=this.state('remote-source:'+id).signature??null;
       try {
+        try{for(const e of await remoteLogs(source)){
+          const session='ssh:'+id+':'+e.session_id,key=session+':'+e.message_id;
+          if(e.kind==='stream'&&e.session_id&&e.message_id){
+            this.db.prepare('INSERT OR IGNORE INTO streams VALUES(?,?,?)').run(key,Date.parse(e.timestamp),e.model);this.dirtyStreams.add(e.message_id);this.raw(key,'stream','ssh:'+id,e);
+          }else this.event('log:ssh:'+id+':'+e.id,{...e,timestamp:new Date(e.timestamp).toISOString(),source:'ssh:'+id});
+        }}catch(e){this.warnings.push('SSH '+id+' logs: '+e.message);}
         const info=await syncRemoteDatabase({...source,id},snapshot,previous);
         const old=this.remoteStatus.get(id)??{};
         this.remoteStatus.set(id,{...old,id,host:source.host,connected:true,lastCheck:new Date().toISOString(),records:info.records??old.records??0,changed:info.changed});
@@ -213,13 +254,14 @@ export class Store {
       }
     }));
     for(const dir of this.config.logDirectories)try{this.scanLogs(dir)}catch(e){this.warnings.push('Log read failed '+dir+': '+e.message);}
-    const pending=synchronized.filter(item=>!item.error&&item.info.changed);
+    const pending=synchronized.filter(item=>!item.error&&(item.info.changed||this.dirtyStreams.size>0)&&fs.existsSync(item.snapshot));
     const files=[...this.config.databases,...pending.map(item=>item.snapshot)];
     if(!this.config.databases.length&&!remoteSources.length)this.warnings.push('No OpenCode database found; configure its path in config.json.');
     try {
       for(const file of files)try {
-        this.scanDatabase(file);
         const remote=pending.find(item=>item.snapshot===file);
+        if(remote?.info.changed)this.db.prepare('DELETE FROM state WHERE id=?').run('dbv2:'+file);
+        this.scanDatabase(file);
         if(remote) {
           this.saveState('remote-source:'+remote.source.id,{signature:remote.info.signature});
           const status=this.remoteStatus.get(remote.source.id);
@@ -227,14 +269,28 @@ export class Store {
         }
       }catch(e){this.warnings.push('Database read failed '+file+': '+e.message);}
     } finally {
-      for(const item of synchronized)fs.rmSync(item.snapshot,{force:true});
+      // Snapshots contain only allowlisted performance metadata.
       this.dirtyStreams.clear();
       this.lastScan=new Date().toISOString();this.scanMs=Date.now()-begin;
     }
   }
+  exportData(kind,query={}) {
+    if(kind==='diagnostics'){
+      const d=this.dashboard(query);
+      return {schema_version:1,extractor_version:EXTRACTOR_VERSION,integrity:this.db.prepare('PRAGMA integrity_check').get().integrity_check,warnings:d.warnings,sources:d.sources,diagnostics:d.diagnostics,coverage:{unit:'assistant_message',raw:'allowlisted performance metadata; no text or credentials',logs:'local logs; SSH only with explicit logDirectories',ttft:'requires observed stream start',events:'only events observed while connected; no replay guarantee'},counts:Object.fromEntries(['records','events','telemetry_v1','record_versions_v1'].map(t=>[t,this.db.prepare('SELECT count(*) n FROM '+t).get().n]))};
+    }
+    const table={history:'records',telemetry:'telemetry_v1',versions:'record_versions_v1'}[kind];
+    if(!table)throw Error('Unknown export');
+    const limit=Number(query.limit??1000),after=Number(query.after??0);
+    if(!Number.isSafeInteger(limit)||limit<1||limit>10000||!Number.isSafeInteger(after)||after<0)throw Error('Invalid cursor or limit');
+    const max=Number(query.snapshot??this.db.prepare('SELECT coalesce(max(rowid),0) n FROM '+table).get().n);
+    if(!Number.isSafeInteger(max)||max<0)throw Error('Invalid snapshot');
+    const items=this.db.prepare('SELECT rowid cursor,* FROM '+table+' WHERE rowid>? AND rowid<=? ORDER BY rowid LIMIT ?').all(after,max,limit);
+    return {schema_version:1,extractor_version:EXTRACTOR_VERSION,snapshot:max,next:items.at(-1)?.cursor??after,done:items.length<limit||items.at(-1)?.cursor===max,items:items.map(x=>({...x,data:parse(x.data)}))};
+  }
     dashboard(query={}) {
     const models=this.db.prepare('SELECT DISTINCT model FROM records ORDER BY model').all().map(x=>x.model);
-    const model=query.model??(models.includes(this.config.defaultModel)?this.config.defaultModel:this.db.prepare('SELECT model FROM records ORDER BY ts DESC LIMIT 1').get()?.model??this.config.defaultModel);
+    const model=query.model??(this.config.defaultModel==='all'||models.includes(this.config.defaultModel)?this.config.defaultModel:this.db.prepare('SELECT model FROM records ORDER BY ts DESC LIMIT 1').get()?.model??this.config.defaultModel);
     if(!models.includes(model)&&model!=='all')models.push(model);
     const rows=this.db.prepare('SELECT data FROM records WHERE (? = ? OR model=?) ORDER BY ts,id').all(model,'all',model).map(x=>parse(x.data));
     const bases=this.db.prepare('SELECT data FROM baselines ORDER BY model,bucket').all().map(x=>parse(x.data));
@@ -269,7 +325,7 @@ export class Store {
     tokenUsage.sources=[...sourceTotals.values()];
     const timed=visible.filter(x=>x.decode_tps!=null), valid=timed.filter(x=>!x.tps_outlier), recent=valid.slice(-20), allEvents=this.db.prepare('SELECT data FROM events ORDER BY ts,id').all().map(x=>parse(x.data)).filter(x=>(model==='all'||x.model===model)&&included(x));
     // Session errors are preferred to matching log events for the same message/status.
-    const canonical=allEvents.filter(x=>!x.id.startsWith('log:')||!allEvents.some(y=>y.id.startsWith('message:')&&y.session_id===x.session_id&&y.message_id===x.message_id&&y.http_status===x.http_status));
+    const canonical=allEvents.filter(x=>!x.id.startsWith('log:')||!allEvents.some(y=>(/^(?:v2:)?message:/.test(y.id))&&x.session_id&&x.message_id&&(y.id.match(/^v2:message:ssh:([^:]+)/)?.[1]??'local')===(x.id.match(/^log:ssh:([^:]+)/)?.[1]??'local')&&y.session_id===x.session_id&&y.message_id===x.message_id&&y.http_status===x.http_status));
     const errors=canonical.filter(x=>x.kind==='error');
     const remoteTimingWarnings=(this.config.sshDatabases??[]).filter(source=>{const status=this.remoteStatus.get(sourceId(source.id??source.host));return status?.eventStream==='offline'&&(status.records??0)>0;}).map(source=>'SSH event timing is disconnected: '+sourceId(source.id??source.host)+'; new remote timing may be incomplete');
     return {models,selectedModel:model,updated:this.lastScan,scan_ms:this.scanMs,warnings:[...this.warnings,...remoteTimingWarnings,...(this.eventStreamStatus==='offline'?['OpenCode 实时事件流未连接，文本片段计时不完整']:[])],sources:{databases:this.config.databases,logs:this.config.logDirectories,sshDatabases:(this.config.sshDatabases??[]).map(source=>{const id=sourceId(source.id??source.host),status=this.remoteStatus.get(id);return {id,host:source.host,connected:status?.connected??false,eventStream:status?.eventStream??'connecting',records:status?.records??null,lastCheck:status?.lastCheck??null,lastIngested:status?.lastIngested??null,error:status?.error??null};})},token_usage:tokenUsage,baselines:bases.filter(x=>model==='all'||x.model===model),summary:{requests:visible.length,completed:visible.filter(x=>x.complete).length,valid_timing:timed.length,included_timing:valid.length,excluded_outliers:timed.length-valid.length,latest_tps:valid.at(-1)?.decode_tps??null,median20_tps:median(recent.map(x=>x.decode_tps)),baseline:median(recent.map(x=>x.baseline)),relative:median(recent.map(x=>x.normalized_tps)),ttft:median(recent.map(x=>x.ttft)),input_tokens:visible.reduce((s,x)=>s+(x.input_tokens??0),0),output_tokens:visible.reduce((s,x)=>s+(x.total_output_tokens??0),0),cache_read_tokens:visible.reduce((s,x)=>s+(x.cache_read_tokens??0),0),cost:visible.reduce((s,x)=>s+(x.cost??0),0),http429:errors.filter(x=>x.http_status===429).length,errors:errors.length,last_error:errors.at(-1)??null,compactions:canonical.filter(x=>x.kind==='compaction').length,unknown_model_errors:this.db.prepare("SELECT count(*) n FROM events WHERE model='unknown'").get().n},diagnostics,rows:visible,events:canonical};

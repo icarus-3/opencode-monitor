@@ -55,8 +55,8 @@ export function analyze(rows, bases, window=5) {
     }
     let state='No throttling', explanation='未检测到持续 decode 下降；这不证明服务端没有限流。';
     const low=values.slice(-10).filter(x=>x<0.8).length;
-    if(!bases.some(b=>b.model===model)) explanation='缺少该模型的独立基准，无法判断相对性能或 throttling；不会套用其他模型的基准。';
-    else if(recent.length<10) explanation=`证据不足：仅 ${recent.length} 条非基准可比较样本（需至少 10 条）；基准样本不用于证明长期稳定。`;
+    if(!bases.some(b=>b.model===model)) {state='Insufficient evidence';explanation='缺少该模型的独立基准，无法判断相对性能或 throttling；不会套用其他模型的基准。';}
+    else if(recent.length<10) {state='Insufficient evidence';explanation=`证据不足：仅 ${recent.length} 条非基准可比较样本（需至少 10 条）；基准样本不用于证明长期稳定。`;}
     else if(relative<0.8&&values.slice(-5).every(x=>x<0.85)) {state='Possible throttling'; explanation='最近样本相对同模型/context 基准持续偏低；负载、输出内容、缓存及客户端计时仍可解释。'; if(recent.length>=20&&low>=8&&median(values.slice(-10))<0.7&&(slope<0||change?.ratio<0.8)) {state='Likely throttling';explanation='至少 20 条样本，最近 10 条中至少 8 条低于基准 80%，中位低于 70%，且有负趋势或下降分段；仅表示强性能异常，无法证明服务端策略。';}}
     return {model,state,explanation,post_seed_samples:live.length,excluded_outliers:rows.filter(r=>r.model===model&&r.tps_outlier&&!r.seed).length,relative,slope_per_hour:slope,change_point:change&&Math.abs(change.ratio-1)>=0.2?change:null,ttft_relative:median(recent.map(r=>r.normalized_ttft)),ttft_note:'TTFT 单独观察，不作为 decode 限速证据；context 已分桶，缓存/网络/排队未校正。'};
   });

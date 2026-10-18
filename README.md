@@ -1,79 +1,112 @@
-# OpenCode Monitor
+# OpenCode Monitor 1.3.0-rc.1
 
-A small local dashboard for OpenCode generation speed and token usage. It reads your OpenCode database and logs in read-only mode and can also aggregate databases from SSH hosts. The dashboard is served only on `127.0.0.1`; there is no telemetry or model/API call.
+完整保留可获得的性能元数据，让人只看简洁前端，让 AI 读取详细历史。只读 OpenCode 数据库和日志；不调用模型，不保存提示词、回复正文、工具输入输出或鉴权头。
 
-This is a user-maintained version based on [icarus-3/opencode-monitor](https://github.com/icarus-3/opencode-monitor). The original MIT license is retained.
+## Windows 11 安装
 
-## Quick start
+需要 Node.js 24+；托盘使用 Windows 11 自带的 .NET Framework 4.x，无 Electron、Python 或额外 npm 运行依赖。Python 仅用于远端 SSH 投影或开发测试。已在 Windows 11 x64 / Node 24.15.0 验证。
 
-Requirements: Node.js 24 or newer. No `npm install` is needed.
+解压 Windows 包后运行（普通用户即可，不需要管理员权限）：
 
-```sh
-git clone https://github.com/yanchun2530/opencode-monitor.git
-cd opencode-monitor
-node server.mjs
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Open <http://127.0.0.1:8765>. On Windows, you can double-click `start.cmd` and `stop.cmd`; Node.js must be installed and available on `PATH`. The server refreshes its data every 8 seconds.
+默认安装到 `%LOCALAPPDATA%\OpenCodeMonitor`。本次命令的 ExecutionPolicy 仅作用于该进程，不修改系统策略。安装完成即后台运行，不打开浏览器。随后直接启动 OpenCode CLI 或桌面应用时，由全局插件加载 Monitor，不依赖 start.cmd 包装 OpenCode，不设置开机启动、计划任务或进程轮询。
 
-The default `config.example.json` automatically discovers common local OpenCode database and log locations. Copy it to `config.json` only when you need custom paths, model, port, or SSH sources. `config.json` and collected data are excluded from Git.
+导入旧监控历史，或使用自定义 OpenCode XDG 配置目录：
 
-## Add SSH sources
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir D:\OpenCode\Monitor -LegacyRoot D:\OpenCode\opencode-monitor -PluginDirectories D:\OpenCodeData\config\opencode\plugins
+```
 
-Edit your local `config.json` and add one entry per SSH host:
+插件安装到 `~/.config/opencode/plugins/opencode-monitor.js`、当前 `XDG_CONFIG_HOME/opencode/plugins`（若设置）及显式提供的目录。安装器备份同名插件，保留现有 config，改默认模型为 all，并合并 auto 来源发现。其他自定义配置目录需要显式传入；`--pure` 会禁用外部插件。`data/installed-plugins.json` 记录实际安装位置。
+
+托盘位于 Windows 通知区域，也可能收在 `^` 隐藏图标中；图标是否固定显示由 Windows 设置决定。单击打开 `http://127.0.0.1:8765`，右键有“打开监控界面 / 状态 / 退出监控器”。关闭浏览器不停止后台；退出菜单停止 Monitor 和托盘，不停止 OpenCode。重复启动复用同一端口实例。端口被其他程序占用、Node 不可用或启动失败会弹出诊断，日志位于 data/tray.log。
+
+手动运行 `MonitorTray.exe`、start.cmd 或 start.ps1 均保持后台运行；双击 start.vbs 不出现终端窗口。`stop.cmd`/stop.ps1 使用本地控制令牌停止后台，托盘随即退出。`node server.mjs` 仍可用于前台调试，Ctrl+C 停止。安装目录需当前用户可写，Node 需在 PATH 中，也可自行放入 runtime/node.exe。
+
+移除自动启动入口可执行 `uninstall-hooks.ps1`；历史和备份不删除。安装器不会修改 OpenCode 的可执行文件、启动脚本、凭据或安全软件。更新正在运行的安装前先 stop.cmd；不要直接覆盖使用中的托盘 EXE。
+
+## OpenCode 支持范围
+
+| 入口 | 已验证情况 | 条件/边界 |
+|---|---|---|
+| V1 CLI 1.18.29 | 真实 debug wait 加载插件并拉起托盘；无需包装脚本 | server() 生命周期；禁用插件时不自动启动 |
+| V2 2.0.32（桌面内置 CLI） | 隔离服务中插件 active，自动拉起 Monitor | setup() 生命周期；加载项目/位置时执行 |
+| 本机 Electron 桌面 OpenCode 2.0.32 | 实际启动应用后 Monitor 自动恢复 | 已运行服务中的插件不会因每次连接必然重新 setup；若主动退出 Monitor 后前端只是复用已加载位置，需手动启动 Monitor 或重新加载该位置/服务 |
+| 其他 V1/V2、ARM64、WSL、远端桌面 | 未认证 | Windows 托盘插件只在 win32 上启动；WSL 不是 Windows 本机 CLI |
+
+双入口形状依据 [官方插件兼容说明](https://opencode.ai/v2/docs/build/plugins/#support-v1)；V1 1.18.29 之前不承诺兼容。托盘跨 OpenCode 退出独立驻留。安装后已经运行的 OpenCode 应重新打开项目或重载插件，以加载新入口。没有使用不可靠的定时启动来掩盖这些生命周期边界。
+
+## 数据与无损升级
+
+`data/monitor.sqlite` 使用 WAL，无历史 TTL。升级旧 schema 前用 SQLite VACUUM INTO 生成 `backup-before-v2-*.sqlite`，覆盖 WAL 中已提交数据；失败时中止升级。显式导入旧库前，对源库和目标库分别生成一致性备份。原始安装目录不会被迁移工具删除或改写。旧库中存在但源 OpenCode 已删除的记录仍会保留。
+
+```powershell
+node migrate.mjs --history old-monitor/data/monitor.sqlite
+node migrate.mjs --seed old-monitor/seed
+```
+
+也兼容安装目录已有 seed/ 的自动导入。发布包不含任何人的 seed、数据库或配置。导入恢复 measurements/identities 的 20 条旧样本和对应冻结基准（若输入包含这些样本），并保留 benchmark 的 process_duration 等专属字段。所有数值/布尔原始测量及必要身份字段进入遥测表；provenance 文件保留 SHA-256 来源指纹。相同 ID 的普通采集不覆盖冻结 seed；历史碰撞的两个版本归档保存。源库和目标当前值冲突时目标优先，seed 优先保留冻结指标。
+
+| 数据表 | 用途 |
+|---|---|
+| records | 当前派生指标；兼容原 API |
+| telemetry_v1 | 追加、按内容去重的性能元数据；包含 source、observed_at、extractor、confidence |
+| record_versions_v1 | 每个 record 的不同派生版本；保留旧字段和重算前结果 |
+| events / streams / live_parts / baselines | 原错误/压缩、stream 起点、分段计时、冻结基准 |
+
+schema 版本为 2，提取器版本为 5。升级前的指标标为 legacy_derived / original_inputs_unavailable，不能将它们伪称为已经恢复的原始输入。新采集保留 token 分类、cost、模型、完成状态、错误状态码/类型、step/tool/compaction 类型和性能时间；排除消息正文和工具载荷。完整 HTTP 成功状态码、网络包和服务端计时不可从这些来源推断。
+
+有部分分段计时时，速度仍可作为带 quality 标记的估值，不是完整计时的等精度测量。异常高 TPS 只从显示/均值排除，原始指标、token 和调用记录不删除。缺基准/样本不足时返回 Insufficient evidence。统计单位是 assistant 消息，不等于物理 HTTP 请求或重试次数。
+
+## AI API 和导出
+
+全部 HTTP 接口只监听 127.0.0.1，默认 8765，无跨域许可。不要把端口转发到公网。它们包含本机路径、会话标识和用量，适合本机 AI 使用。
+
+- `/api/dashboard?model=all&from=2026-10-17T00:00:00Z&to=2026-10-19T00:00:00Z`：兼容完整派生指标、基准、事件、诊断和简洁前端。
+- `/api/history?limit=1000&after=0`：原始当前指标 JSON，不受曲线 120 条限制。
+- `/api/telemetry?limit=1000&after=0`：可离线重算的白名单性能输入与来源。
+- `/api/versions?limit=1000&after=0`：历史派生版本。
+- `/api/diagnostics`：完整性、覆盖边界、来源状态、计数及诊断；不新增诊断网页。
+- `/api/health`：应用身份、版本、PID 和扫描状态，供托盘诊断。
+
+分页响应含 schema_version / extractor_version / snapshot / next / done / items。后续页带上同一 snapshot 和 after=next；limit 为 1–10000。遥测与版本表只追加；history 是查询时当前值，跨页期间可能更新。需要严格一致快照时使用以下 JSONL 导出（只读 SQLite 事务，目标文件必须不存在）：
+
+```powershell
+node export.mjs history history.jsonl
+node export.mjs telemetry telemetry.jsonl
+node export.mjs versions versions.jsonl
+node export.mjs events events.jsonl
+node export.mjs baselines baselines.jsonl
+```
+
+本地控制 POST 接口用 data/control.token 鉴权，令牌不通过 GET API 返回。插件只转发四种 text/reasoning started/ended 计时事件，且传输前再次白名单投影。默认不为监听事件而启动 OpenCode 服务。不要在 AI 分析或发布文件中携带 control.token。
+
+## 配置与 SSH
+
+参考 config.example.json。auto 同时寻找 XDG、用户标准数据目录和原 D 盘数据目录。SSH 的单个来源可配置如下（远端不需要安装 Monitor）：
 
 ```json
-{
-  "id": "my-server",
-  "host": "user@server.example.com",
-  "path": "~/.local/share/opencode/opencode.db"
-}
+{"id":"server1","host":"your-ssh-alias","path":"~/.local/share/opencode/opencode.db","logDirectories":["~/.local/share/opencode/log"],"timeoutMs":18000}
 ```
 
-For example, the complete field is:
+放入 config.json 的 sshDatabases 数组。需用户已配置好的 OpenSSH 密钥/代理与 known_hosts、远端 Python3 + SQLite。使用 BatchMode，不保存密码；不会修改安全策略或静默接受未知主机密钥。远端先投影再传输，不带回正文、工具载荷、响应体或凭据；本地 data/remote-sources 只保留该投影，供迟到事件补算。变化签名为投影内容 SHA-256，旧行回写即使不改变水位也会触发全量重提取。
 
-```json
-"sshDatabases": [
-  { "id": "server-1", "host": "user@server1", "path": "~/.local/share/opencode/opencode.db" },
-  { "id": "server-2", "host": "user@server2", "path": "~/.local/share/opencode/opencode.db" }
-]
-```
+SSH 当前仅支持 session_message V2 schema；不承诺远端旧 message/part。远端日志必须显式配置，才能补上 stream 起点、临时错误和 compaction；日志失败会报告但不阻断数据库采集。该日志投影读取所配置现存日志，32 MiB 返回上限和超时会报错，不把部分读取冒充完整。实时 SSH 计时仍依赖 Linux /proc 中运行的 OpenCode 和可用 api 命令；非 Linux、只在 WSL 内运行、未运行服务或断线期间无法保证实时覆盖。没有可用 stream 起点时 TTFT/E2E 为 null，绝不伪造。
 
-Use hosts already configured in your SSH config or `user@host` names. SSH authentication uses your normal OpenSSH setup; this project does not store SSH passwords or keys. Remote hosts need Python 3 and permission to read the OpenCode database. Restart the monitor after editing the configuration.
+已删除的日志、停机期间只在事件流存在的数据、源未记录的重试、未知 schema 和服务端内部等待不可事后恢复。本地增量扫描依赖源 time_updated；不更新时间的任意本地手工回写需清除 db/dbv2 水位后重扫。保留的元数据支持复算已观测指标，不等于完整会话或网络录制。
 
-## Privacy
+## 构建与测试
 
-- The source database is opened read-only. The monitor does not modify OpenCode settings or database files.
-- Local derived metrics are stored under `data/`; that directory is ignored by Git.
-- SSH sources are read through your existing SSH connection. A temporary normalized snapshot is stored locally and removed after ingestion.
-- Prompts, generated text, API keys, SSH credentials, and personal database files are not included in this repository.
-- The listener accepts requests only from localhost.
-
-## What it shows
-
-- Current generation speed and the average of the latest 20 valid calls. Extreme speed outliers are excluded from these speed statistics.
-- A time-series chart of recent valid speeds.
-- Cumulative input and output token counts across all models and configured sources. Output includes reasoning tokens.
-- Expandable token totals for the local database and each configured SSH source.
-- An arithmetic average of valid per-call generation speeds for each configurable token-usage interval (10 million tokens by default). Speed outliers are excluded, calls crossing an interval boundary contribute in proportion to their token share, and older interval results are expandable in the dashboard.
-- The current in-progress interval shows a provisional average that updates as new usage arrives; the last completed interval remains visible until the new interval has valid measurements.
-
-## Configuration
-
-`config.example.json` is the safe default. The main fields are:
-
-- `databases`: local database paths, or `"auto"` for discovery.
-- `logDirectories`: local log folders, or `"auto"` for discovery.
-- `sshDatabases`: optional SSH host/database entries.
-- `pollSeconds`: refresh interval (minimum 5 seconds).
-- `defaultModel`: model to display, or `"all"` to select the latest model when records exist.
-- `tokenSpeedBucketSize`: total input-plus-output tokens per average-speed interval; defaults to `10000000`.
-
-## Development
-
-```sh
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build.ps1
 npm test
-npm start
 ```
 
-The project uses Node.js built-in modules only. See [LICENSE](LICENSE) for the MIT license.
+托盘由系统 C# 编译器构建为 winexe。完整开发测试设置 TEST_PYTHON（Python 路径）、TEST_V1（V1 CLI 路径）、TEST_V2（桌面 CLI 路径）；未设置时相应平台测试会明确 skip。端到端测试使用临时库、独立配置目录及 18765/18766 端口，不发模型请求。不要与其他同端口测试同时运行。检查 skip 数，不能把未运行的测试算作通过。真实 SSH 网络/密钥和 Windows ARM64 尚未现场验证。
+
+## 发布
+
+当前为 1.3.0-rc.1。Windows 产物包含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。保持 rc，直到已声明的支持边界获得更多现场验证。GitHub 发布需要目标仓库写权限；本地 tag 不等于 GitHub Release 已发布。

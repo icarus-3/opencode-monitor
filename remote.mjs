@@ -5,6 +5,8 @@ import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
+const transfers=new Set();
+export function cancelRemoteTransfers(){for(const child of transfers)child.kill();}
 
 function runSsh(host, command, timeoutMs, maxBytes) {
   return new Promise((resolve, reject) => {
@@ -15,6 +17,7 @@ function runSsh(host, command, timeoutMs, maxBytes) {
       host,
       command
     ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    transfers.add(child);child.once('close',()=>transfers.delete(child));
     const chunks = [];
     let byteCount = 0;
     let stderr = '';
@@ -70,10 +73,11 @@ function runSsh(host, command, timeoutMs, maxBytes) {
   });
 }
 
-export async function syncRemoteDatabase(source, target, previousSignature) {
+export async function syncRemoteDatabase(source, target, previousSignature, runner=runSsh) {
+  if(typeof source.host!=='string'||source.host.startsWith('-'))throw Error('Invalid SSH host');
   const remotePath = source.path ?? '~/.local/share/opencode/opencode.db';
   const script = [
-    'import gzip,json,os,sqlite3,sys,tempfile,urllib.parse',
+    'import gzip,json,os,sqlite3,sys,tempfile,urllib.parse,hashlib',
     'db_path=os.path.expanduser(' + JSON.stringify(remotePath) + ')',
     'if not os.path.isfile(db_path): raise RuntimeError("OpenCode database not found")',
     'uri="file:"+urllib.parse.quote(db_path,safe="/")+"?mode=ro"',
@@ -83,12 +87,8 @@ export async function syncRemoteDatabase(source, target, previousSignature) {
     'if "session_message" not in tables: raise RuntimeError("Unsupported OpenCode database: session_message missing")',
     'cols={r[1] for r in src.execute("PRAGMA table_info(session_message)")}',
     'if not {"id","session_id","type","seq","time_created","time_updated","data"}.issubset(cols): raise RuntimeError("Unsupported session_message schema")',
-    'row=src.execute("SELECT COUNT(*),MAX(time_updated),MAX(seq) FROM session_message WHERE type IN (\'assistant\',\'compaction\')").fetchone()',
-    'signature="|".join("-" if v is None else str(v) for v in row)',
-    'previous=' + (previousSignature == null ? 'None' : JSON.stringify(previousSignature)),
-    'sys.stderr.write("OPENCODE_MONITOR_META "+json.dumps({"signature":signature,"records":row[0],"last_updated":row[1]},separators=(",",":"))+"\\n")',
-    'sys.stderr.flush()',
-    'if signature != previous:',
+    'digest=hashlib.sha256()',
+    'if True:',
     ' dst=sqlite3.connect(":memory:")',
     ' dst.execute("CREATE TABLE session_v2(id TEXT PRIMARY KEY)")',
     ' dst.execute("CREATE TABLE session_message(id TEXT,session_id TEXT,type TEXT,seq INTEGER,time_created INTEGER,time_updated INTEGER,data TEXT,PRIMARY KEY(session_id,id))")',
@@ -128,7 +128,14 @@ export async function syncRemoteDatabase(source, target, previousSignature) {
     '    if isinstance(parttime,dict): item["time"]={k:parttime.get(k) for k in ("created","completed") if parttime.get(k) is not None}',
     '    cleancontent.append(item)',
     '   clean["content"]=cleancontent',
-    '  dst.execute("INSERT INTO session_message VALUES(?,?,?,?,?,?,?)",(mid,sid,typ,seq,created,updated,json.dumps(clean,separators=(",",":"))))',
+    '  projected=json.dumps(clean,separators=(",",":"),sort_keys=True)',
+    '  digest.update(json.dumps([mid,sid,typ,seq,created,updated,projected],separators=(",",":")).encode())',
+    '  dst.execute("INSERT INTO session_message VALUES(?,?,?,?,?,?,?)",(mid,sid,typ,seq,created,updated,projected))',
+    ' signature=digest.hexdigest()',
+    ' count=dst.execute("SELECT COUNT(*) FROM session_message").fetchone()[0]',
+    ' sys.stderr.write("OPENCODE_MONITOR_META "+json.dumps({"signature":signature,"records":count})+"\\n");sys.stderr.flush()',
+    ' previous=' + (previousSignature == null ? 'None' : JSON.stringify(previousSignature)),
+    ' if signature == previous: sys.exit(0)',
     ' dst.commit()',
     ' try: raw=dst.serialize()',
     ' except AttributeError:',
@@ -143,7 +150,7 @@ export async function syncRemoteDatabase(source, target, previousSignature) {
   ].join('\n');
   const encoded = Buffer.from(script, 'utf8').toString('base64');
   const command = 'python3 -c "import base64;exec(base64.b64decode(\'' + encoded + '\'))"';
-  const { meta, compressed } = await runSsh(source.host, command, source.timeoutMs ?? 18000, source.maxCompressedBytes ?? 32 * 1024 * 1024);
+  const { meta, compressed } = await runner(source.host, command, source.timeoutMs ?? 18000, source.maxCompressedBytes ?? 32 * 1024 * 1024);
   if (typeof meta.signature !== 'string') throw new Error('Remote metadata missing signature');
   if (meta.signature === previousSignature) return { signature: meta.signature, records: meta.records, changed: false };
   if (!compressed.length) throw new Error('Remote database changed but no snapshot was returned');
