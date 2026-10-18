@@ -1,12 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {spawn,execFileSync} from 'node:child_process';import {Store} from './store.mjs';import {stageLocalPackage,launchUpdate} from './updater.mjs';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function copyBundle(target){fs.mkdirSync(target,{recursive:true});for(const file of fs.readdirSync('.',{withFileTypes:true}).filter(x=>x.isFile()&&x.name!=='config.json'))fs.copyFileSync(file.name,path.join(target,file.name));fs.cpSync('public',path.join(target,'public'),{recursive:true});}
-function manifest(root){const files={};for(const base of ['', 'public'])for(const entry of fs.readdirSync(path.join(root,base),{withFileTypes:true})){if(!entry.isFile()||entry.name==='update-manifest.json')continue;const relative=base?base+'/'+entry.name:entry.name;files[relative]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,relative))).digest('hex');}fs.writeFileSync(path.join(root,'update-manifest.json'),JSON.stringify({schema:1,version:'1.3.0-rc.2',files}));}
+function manifest(root){const files={};for(const base of ['', 'public'])for(const entry of fs.readdirSync(path.join(root,base),{withFileTypes:true})){if(!entry.isFile()||entry.name==='update-manifest.json')continue;const relative=base?base+'/'+entry.name:entry.name;files[relative]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,relative))).digest('hex');}fs.writeFileSync(path.join(root,'update-manifest.json'),JSON.stringify({schema:1,version:JSON.parse(fs.readFileSync('package.json')).version,files}));}
 test('real Windows update replaces files, backs up SQLite, preserves config/history and restarts one tray',{skip:process.platform!=='win32',timeout:80000},async()=>{
  const parent=fs.mkdtempSync(path.join(os.tmpdir(),'monitor-update-e2e-')),target=path.join(parent,'installed'),packageRoot=path.join(parent,'package');copyBundle(target);copyBundle(packageRoot);manifest(packageRoot);
  fs.unlinkSync(path.join(target,'UpdateLauncher.exe')); // rc.1 had no native update launcher.
  const p=JSON.parse(fs.readFileSync(path.join(target,'package.json')));p.version='0.0.0';fs.writeFileSync(path.join(target,'package.json'),JSON.stringify(p));
  const config={port:18765,pollSeconds:5,databases:[],logDirectories:[],sshDatabases:[],defaultModel:'all',user_setting:'preserve-me'};fs.writeFileSync(path.join(target,'config.json'),JSON.stringify(config));
+ const hook=path.join(parent,'opencode-monitor.js');fs.mkdirSync(path.join(target,'data'),{recursive:true});fs.writeFileSync(hook,'const root='+JSON.stringify(target.replaceAll('\\','/'))+';\n// previous hook');fs.writeFileSync(path.join(target,'data','installed-plugins.json'),JSON.stringify([hook]));
  const s=new Store(target,config);s.record('retained',{id:'retained',timestamp:new Date(1000).toISOString(),model:'p/A',input_tokens:100,custom_metric:42});s.db.close();
  const initial=spawn(path.join(target,'MonitorTray.exe'),[],{cwd:target,windowsHide:true,stdio:'ignore'});
  try{
@@ -18,8 +19,9 @@ test('real Windows update replaces files, backs up SQLite, preserves config/hist
    const result={backup:output.split('backup: ')[1].trim()};
    let status;for(let i=0;i<300;i++){try{status=JSON.parse(fs.readFileSync(path.join(target,'data','update-status.json'),'utf8').replace(/^\uFEFF/,''));if(['installed','failed'].includes(status.state))break;}catch{}await sleep(100);}
    assert.equal(status?.state,'installed',JSON.stringify(status));
-   assert.equal((await(await fetch('http://127.0.0.1:18765/api/health')).json()).version,'1.3.0-rc.2');
+   assert.equal((await(await fetch('http://127.0.0.1:18765/api/health')).json()).version,JSON.parse(fs.readFileSync('package.json')).version);
    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target,'config.json'))),config);assert.ok(fs.existsSync(path.join(result.backup,'monitor.sqlite')));
+   assert.ok(fs.readFileSync(hook,'utf8').includes('OpenCodeWindowHook'));assert.ok(fs.existsSync(path.join(result.backup,'hooks','plugin-hooks.json')));
    const next=new Store(target,config);try{assert.equal(next.dashboard().rows[0].custom_metric,42);assert.equal(next.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');}finally{next.db.close();}
  }finally{
    try{const token=fs.readFileSync(path.join(target,'data','control.token'),'utf8').trim();await fetch('http://127.0.0.1:18765/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+token}});}catch{}

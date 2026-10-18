@@ -25,6 +25,7 @@ try{
   $copied+=@{target=$manifestTarget;backup=$manifestBackup;existed=(Test-Path -LiteralPath $manifestTarget)}
   $replaced=$true
   foreach($item in $copied){$relative=$item.target.Substring($InstallDir.Length+1);New-Item -ItemType Directory -Path (Split-Path $item.target) -Force | Out-Null;Copy-Item -LiteralPath (Join-Path $StagedDir $relative) -Destination $item.target -Force}
+  & (Join-Path $InstallDir 'sync-hooks.ps1') -InstallDir $InstallDir -BackupDir (Join-Path $BackupDir 'hooks')
   $newTray=Start-Process -FilePath (Join-Path $InstallDir 'MonitorTray.exe') -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
   $ready=$false
   for($i=0;$i -lt $ReadinessAttempts;$i++){Start-Sleep -Milliseconds 500;try{$h=Invoke-RestMethod "http://127.0.0.1:$Port/api/health" -TimeoutSec 1;$readyTray=[int](Get-Content (Join-Path $InstallDir 'data\tray.pid') -Raw);if($h.app -eq 'opencode-monitor' -and $h.version -eq $manifest.version -and [IO.Path]::GetFullPath($h.root).TrimEnd('\') -eq $InstallDir -and $readyTray -eq $newTray.Id){$ready=$true;break}}catch{}}
@@ -37,7 +38,7 @@ try{
     if(Test-Path $tokenFile){$token=(Get-Content $tokenFile -Raw).Trim();try{Invoke-RestMethod -Method Post "http://127.0.0.1:$Port/api/shutdown" -Headers @{Authorization="Bearer $token"} -TimeoutSec 2 | Out-Null}catch{}}
     Start-Sleep -Seconds 2
     if($newTray -and -not $newTray.HasExited){$newTray.Kill();$newTray.WaitForExit()}
-    if($replaced){foreach($item in $copied){if($item.existed){Copy-Item -LiteralPath $item.backup -Destination $item.target -Force}else{if(Test-Path -LiteralPath $item.target){Remove-Item -LiteralPath $item.target -Force}}}}
+    if($replaced){& (Join-Path $StagedDir 'sync-hooks.ps1') -InstallDir $InstallDir -BackupDir (Join-Path $BackupDir 'hooks') -Rollback;foreach($item in $copied){if($item.existed){Copy-Item -LiteralPath $item.backup -Destination $item.target -Force}else{if(Test-Path -LiteralPath $item.target){Remove-Item -LiteralPath $item.target -Force}}}}
     Start-Process -FilePath (Join-Path $InstallDir 'MonitorTray.exe') -WorkingDirectory $InstallDir -WindowStyle Hidden
   }catch{$failure+='; rollback: '+$_.Exception.Message}
   Status 'failed' $failure

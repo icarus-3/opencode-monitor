@@ -1,4 +1,4 @@
-# OpenCode Monitor 1.3.0-rc.2
+# OpenCode Monitor 1.3.0-rc.3
 
 完整保留可获得的性能元数据，让人只看简洁前端，让 AI 读取详细历史。只读 OpenCode 数据库和日志；不调用模型，不保存提示词、回复正文、工具输入输出或鉴权头。
 
@@ -16,13 +16,13 @@ A→B 会重新计算本轮均速、曲线、Token 用量和 1000 万 Token 区�
 
 更新前一致性备份 SQLite 至 data/update-backups/，并备份被替换的程序文件。等待后台及托盘停止后替换程序，保留配置、全部历史、插件路径及 App 浏览器资料，随后后台重启。失败时尝试恢复程序文件；数据库备份保留供恢复，不自动倒退或覆盖采集数据。诊断在 data/update-status.json 和 data/update-helper.log。关闭页面不取消已启动的更新辅助程序。
 
-rc.1 尚无应用内更新按钮，首次升级需使用本地更新包：解压 opencode-monitor-1.3.0-rc.2-update.zip 到安装目录外，在解压后的项目目录执行：
+rc.1 尚无应用内更新按钮，首次升级需使用本地更新包：解压 opencode-monitor-1.3.0-rc.3-update.zip 到安装目录外，在解压后的项目目录执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\apply-update.ps1 -InstallDir D:\OpenCode\opencode-monitor-v1.3.0-rc.1
 ```
 
-它会自动停止旧服务并更新原目录；目录名保留旧名称，实际版本以页面/health/package.json 为准。需要 Node 24 和 Windows 内置 PowerShell，无管理员要求。首次新安装仍使用 install.ps1。离线更新验证包内清单并拒绝降级；下载包可先与 SHA256SUMS-1.3.0-rc.2.txt 核对。
+它会自动停止旧服务并更新原目录；目录名保留旧名称，实际版本以页面/health/package.json 为准。需要 Node 24 和 Windows 内置 PowerShell，无管理员要求。首次新安装仍使用 install.ps1。离线更新验证包内清单并拒绝降级；下载包可先与 SHA256SUMS-1.3.0-rc.3.txt 核对。
 
 托盘单击或“打开监控界面（默认浏览器）”始终尊重 Windows 默认浏览器，包括 Chrome；不修改默认设置。“打开 App 窗口”为可选浏览器应用模式：默认浏览器是 Chrome/Edge 时使用对应引擎，否则尝试本机 Edge，再回退默认浏览器。它隐藏地址栏和标签栏，使用独立资料目录，关闭窗口仍保留后台。该模式不是额外捆绑 Electron 的原生 UI。
 
@@ -52,13 +52,25 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -InstallDi
 
 移除自动启动入口可执行 `uninstall-hooks.ps1`；历史和备份不删除。安装器不会修改 OpenCode 的可执行文件、启动脚本、凭据或安全软件。更新正在运行的安装前先 stop.cmd；不要直接覆盖使用中的托盘 EXE。
 
+## 桌面重新启动修复（rc.3）
+
+桌面托盘退出后，OpenCode 的后台服务可能继续运行。原插件只在 setup/server 执行时拉起 Monitor，重新打开桌面并不保证再次执行钩子。rc.3 增加 OpenCodeWindowHook.exe，由插件启动，通过 Windows SetWinEventHook 接收顶层窗口显示事件，仅匹配允许路径中的 OpenCode.exe，并按进程启动身份去重。没有进程扫描、开机启动或计划任务，不修改 OpenCode 程序。
+
+默认识别 `%LOCALAPPDATA%/Programs/@opencodedesktop/OpenCode.exe`；非默认安装可在 config.json 添加 `"desktopExecutables": ["D:/Apps/OpenCode/OpenCode.exe"]`，重新加载插件后生效。新桌面进程出现时再次启动 Monitor，托盘互斥锁保证单实例。同一进程窗口显示或切换焦点不会撤销用户主动退出 Monitor 的操作；隐藏并恢复同一进程不算重新启动。
+
+退出 Monitor 停止托盘和采集进程。小型事件桥归 OpenCode 插件宿主所有，保留到宿主退出，以便下一次桌面启动恢复 Monitor；不采集会话内容。诊断见 data/desktop-startup.log、data/window-hook.pid。uninstall-hooks.ps1 同时停止桥，不删除历史。桥从 data/window-hook/ 的内容哈希副本运行，不锁住待更新程序。
+
+更新器备份并刷新 data/installed-plugins.json 中属于本安装的全局插件，失败时一并回滚；其他安装的插件保持原样。已经加载的旧插件不被强制重载，避免打断任务；服务自然重启或位置重新加载后才加载新插件。当前机器可确认宿主 PID 后单独启用桥，无需关闭服务。
+
+机制依据：[OpenCode 插件生命周期](https://opencode.ai/v2/docs/build/plugins/#lifecycle)、[Windows SetWinEventHook](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook)。
+
 ## OpenCode 支持范围
 
 | 入口 | 已验证情况 | 条件/边界 |
 |---|---|---|
 | V1 CLI 1.18.29 | 真实 debug wait 加载插件并拉起托盘；无需包装脚本 | server() 生命周期；禁用插件时不自动启动 |
 | V2 2.0.32（桌面内置 CLI） | 隔离服务中插件 active，自动拉起 Monitor | setup() 生命周期；加载项目/位置时执行 |
-| 本机 Electron 桌面 OpenCode 2.0.32 | 实际启动应用后 Monitor 自动恢复 | 已运行服务中的插件不会因每次连接必然重新 setup；若主动退出 Monitor 后前端只是复用已加载位置，需手动启动 Monitor 或重新加载该位置/服务 |
+| 本机 Electron 桌面 OpenCode 2.0.32 | 插件冷启动及 Windows 窗口事件补足桌面进程重启 | 同一 Windows 用户会话；默认安装路径或 desktopExecutables 指定路径；复用旧后台服务不再依赖 setup 重跑 |
 | 其他 V1/V2、ARM64、WSL、远端桌面 | 未认证 | Windows 托盘插件只在 win32 上启动；WSL 不是 Windows 本机 CLI |
 
 双入口形状依据 [官方插件兼容说明](https://opencode.ai/v2/docs/build/plugins/#support-v1)；V1 1.18.29 之前不承诺兼容。托盘跨 OpenCode 退出独立驻留。安装后已经运行的 OpenCode 应重新打开项目或重载插件，以加载新入口。没有使用不可靠的定时启动来掩盖这些生命周期边界。
@@ -133,4 +145,4 @@ npm test
 
 ## 发布
 
-当前为 1.3.0-rc.2。Windows 安装包与本地更新包使用相同程序和逐文件清单，含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。开发者可先运行 build.ps1，再用 node build-release.mjs OUTPUT_DIRECTORY 生成两种包和 SHA256SUMS。保持 rc，直到已声明的支持边界获得更多现场验证。
+当前为 1.3.0-rc.3。Windows 安装包与本地更新包使用相同程序和逐文件清单，含托盘 EXE、源码、安装器、测试、说明；不捆绑 Node，不含个人数据。开发者可先运行 build.ps1，再用 node build-release.mjs OUTPUT_DIRECTORY 生成两种包和 SHA256SUMS。保持 rc，直到已声明的支持边界获得更多现场验证。

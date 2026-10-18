@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 // Installer replaces this with an absolute path; no shell or process polling.
 const root=__MONITOR_ROOT__;
 const timingTypes=new Set(['session.text.started','session.text.ended','session.reasoning.started','session.reasoning.ended']);
@@ -22,6 +23,13 @@ const launch=async()=>{
   try{
     fs.mkdirSync(path.join(root,'data'),{recursive:true});
     fs.appendFileSync(path.join(root,'data','plugin-starts.jsonl'),JSON.stringify({timestamp:new Date().toISOString(),event:'plugin_setup'})+'\n');
+    // Run an immutable copy so an active startup subscription cannot lock update files.
+    const bytes=fs.readFileSync(path.join(root,'OpenCodeWindowHook.exe'));
+    const bridgeDir=path.join(root,'data','window-hook');fs.mkdirSync(bridgeDir,{recursive:true});
+    const bridgeExe=path.join(bridgeDir,'OpenCodeWindowHook-'+crypto.createHash('sha256').update(bytes).digest('hex').slice(0,16)+'.exe');
+    try{fs.writeFileSync(bridgeExe,bytes,{flag:'wx'});}catch(e){if(e.code!=='EEXIST')throw e;}
+    const bridge=spawn(bridgeExe,['--parent',String(process.pid),'--root',root],{cwd:root,windowsHide:true,detached:true,stdio:'ignore'});
+    bridge.on('error',e=>fs.appendFileSync(path.join(root,'data','plugin-error.log'),new Date().toISOString()+' desktop hook: '+e.message+'\n'));bridge.unref();
     const child=spawn(path.join(root,'MonitorTray.exe'),[],{cwd:root,windowsHide:true,detached:true,stdio:'ignore'});
     child.on('error',e=>{fs.appendFileSync(path.join(root,'data','plugin-error.log'),new Date().toISOString()+' '+e.message+'\n');});
     child.unref();

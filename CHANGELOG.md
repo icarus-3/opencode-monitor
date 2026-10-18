@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0-rc.3 — 2026-10-18
+
+- Fix desktop reopening against a persistent OpenCode backend with a user-session Windows window event bridge owned by the plugin host. No process polling, scheduled tasks or login startup. Match approved executable paths and deduplicate desktop process identities; respect explicit Monitor quit until the next desktop process launch.
+- Run the bridge from a content-addressed copy so updates can replace binaries. Stop with its plugin host or hook removal; retain startup diagnostics.
+- Back up and refresh owned generated startup plugins during updates, preserve other installations and restore hooks on rollback.
+- Add isolated window restart/quit, duplicate bridge, approved-path, parent-lifetime and plugin-update regressions. Preserve model isolation, configuration and history.
+
 ## 1.3.0-rc.2 — 2026-10-18
 
 - Fresh measurement epochs exclude auto-discovered/imported history from the homepage without deleting history. Exact model switches start a new run, including switches back to a previously used model.
